@@ -15,6 +15,7 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <uxtheme.h>
+#include <vsstyle.h>
 #include <string>
 #include <atomic>
 #include <memory>
@@ -101,6 +102,61 @@ HBRUSH pageBrush() { static HBRUSH light = CreateSolidBrush(RGB(0xF3, 0xF3, 0xF3
 HBRUSH navBrush() { static HBRUSH light = CreateSolidBrush(RGB(0xF0, 0xEF, 0xF5)); static HBRUSH dark = CreateSolidBrush(RGB(0x19, 0x19, 0x1B)); return g.dark ? dark : light; }
 HBRUSH editBrush() { static HBRUSH light = CreateSolidBrush(RGB(0xFF, 0xFF, 0xFF)); static HBRUSH dark = CreateSolidBrush(RGB(0x2B, 0x2B, 0x2E)); return g.dark ? dark : light; }
 
+// The themed BUTTON renderer can ignore WM_CTLCOLORBTN's text color.
+// Keep native glyphs/backgrounds, but explicitly draw readable dark-mode text.
+LRESULT drawDarkButton(NMCUSTOMDRAW* draw) {
+    if (draw->dwDrawStage != CDDS_PREPAINT) return CDRF_DODEFAULT;
+    HWND button = draw->hdr.hwndFrom;
+    const LONG_PTR style = GetWindowLongPtrW(button, GWL_STYLE);
+    const UINT type = (UINT)(style & BS_TYPEMASK);
+    const bool checkbox = type == BS_AUTOCHECKBOX || type == BS_CHECKBOX;
+    const bool radio = type == BS_AUTORADIOBUTTON || type == BS_RADIOBUTTON;
+    if (!checkbox && !radio && type != BS_PUSHBUTTON && type != BS_DEFPUSHBUTTON)
+        return CDRF_DODEFAULT;
+    HTHEME theme = OpenThemeData(button, L"Button");
+    if (!theme) return CDRF_DODEFAULT;
+    const bool disabled = !IsWindowEnabled(button);
+    const bool pressed = (draw->uItemState & CDIS_SELECTED) != 0;
+    const bool hot = (draw->uItemState & CDIS_HOT) != 0;
+    int state = disabled ? 4 : pressed ? 3 : hot ? 2 : 1;
+    RECT textRect = draw->rc;
+    FillRect(draw->hdc, &draw->rc, pageBrush());
+    if (checkbox || radio) {
+        const int part = radio ? BP_RADIOBUTTON : BP_CHECKBOX;
+        if (SendMessageW(button, BM_GETCHECK, 0, 0) == BST_CHECKED) state += 4;
+        SIZE size{px(16), px(16)};
+        GetThemePartSize(theme, draw->hdc, part, state, nullptr, TS_TRUE, &size);
+        RECT glyph{draw->rc.left, draw->rc.top + (draw->rc.bottom - draw->rc.top - size.cy) / 2,
+                   draw->rc.left + size.cx, 0};
+        glyph.bottom = glyph.top + size.cy;
+        DrawThemeBackground(theme, draw->hdc, part, state, &glyph, nullptr);
+        textRect.left = glyph.right + px(6);
+    } else {
+        if (!disabled && !pressed && !hot && type == BS_DEFPUSHBUTTON) state = PBS_DEFAULTED;
+        DrawThemeBackground(theme, draw->hdc, BP_PUSHBUTTON, state, &draw->rc, nullptr);
+        InflateRect(&textRect, -px(4), 0);
+    }
+    CloseThemeData(theme);
+    const int saved = SaveDC(draw->hdc);
+    HFONT font = (HFONT)SendMessageW(button, WM_GETFONT, 0, 0);
+    if (font) SelectObject(draw->hdc, font);
+    SetBkMode(draw->hdc, TRANSPARENT);
+    SetTextColor(draw->hdc, disabled ? secondaryColor() : textColor());
+    wchar_t text[512]{};
+    GetWindowTextW(button, text, (int)std::size(text));
+    UINT flags = DT_SINGLELINE | DT_VCENTER | (checkbox || radio ? DT_LEFT : DT_CENTER);
+    const LRESULT uiState = SendMessageW(button, WM_QUERYUISTATE, 0, 0);
+    if (uiState & UISF_HIDEACCEL) flags |= DT_HIDEPREFIX;
+    DrawTextW(draw->hdc, text, -1, &textRect, flags);
+    if ((draw->uItemState & CDIS_FOCUS) && !(uiState & UISF_HIDEFOCUS)) {
+        RECT focus = textRect;
+        InflateRect(&focus, -1, -2);
+        DrawFocusRect(draw->hdc, &focus);
+    }
+    RestoreDC(draw->hdc, saved);
+    return CDRF_SKIPDEFAULT;
+}
+
 LRESULT CALLBACK hotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g.dark && msg == WM_PAINT) {
         PAINTSTRUCT ps{};
@@ -159,8 +215,17 @@ void enableCommonControlDarkMode() {
     }
 }
 
+HIMAGELIST createTabImages();
+
 void applyTheme(HWND hwnd) {
     if (!hwnd) return;
+    if (g.tabImages) {
+        HIMAGELIST images = createTabImages();
+        if (images) {
+            ImageList_Destroy(g.tabImages);
+            g.tabImages = images;
+        }
+    }
     BOOL dark = g.dark;
     DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
     SetWindowTheme(hwnd, g.dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
@@ -215,7 +280,7 @@ HIMAGELIST createTabImages() {
                                       reinterpret_cast<void**>(&pixels), nullptr, 0);
     HGDIOBJ oldBitmap = SelectObject(dc, bitmap);
     HBRUSH maskBrush = CreateSolidBrush(RGB(255, 0, 255));
-    HPEN pen = CreatePen(PS_SOLID, std::max(1, px(1)), GetSysColor(COLOR_WINDOWTEXT));
+    HPEN pen = CreatePen(PS_SOLID, std::max(1, px(1)), textColor());
     HGDIOBJ oldPen = SelectObject(dc, pen);
     HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
     auto p = [](int value) { return px(value); };
@@ -274,19 +339,10 @@ HIMAGELIST createTabImages() {
             MoveToEx(dc, p(8), p(7), nullptr); LineTo(dc, p(8), p(12));
             break;
         }
-        std::vector<BYTE> andMask(((size + 15) / 16) * 2 * size, 0xFF);
-        std::vector<BYTE> xorMask(andMask.size(), 0x00);
-        const int rowBytes = ((size + 15) / 16) * 2;
-        for (int yy = 0; yy < size; ++yy) {
-            for (int xx = 0; xx < size; ++xx) {
-                if ((pixels[yy * size + xx] & 0x00FFFFFF) != 0x00FF00FF)
-                    andMask[yy * rowBytes + xx / 8] &= static_cast<BYTE>(~(0x80 >> (xx % 8)));
-            }
-        }
-        HICON iconHandle = CreateIcon(GetModuleHandleW(nullptr), size, size, 1, 1,
-                                      andMask.data(), xorMask.data());
-        ImageList_ReplaceIcon(images, -1, iconHandle);
-        DestroyIcon(iconHandle);
+        // Preserve the theme-colored strokes. A monochrome CreateIcon with
+        // an all-zero XOR mask turns every visible stroke black in all themes.
+        GdiFlush();
+        ImageList_AddMasked(images, bitmap, RGB(255, 0, 255));
     }
     SelectObject(dc, oldBrush);
     SelectObject(dc, oldPen);
@@ -808,7 +864,15 @@ void onCommand(int id, int code) {
                     auto* payload = new BuiltInProgress{fraction, status, done};
                     if (!PostMessageW(target, kMsgBuiltInProgress, 0, (LPARAM)payload)) delete payload;
                 };
+                ULONGLONG lastProgressTick = 0;
+                std::wstring lastProgressStatus;
                 bool ok = builtin::Download(*cancel, [&](double fraction, const std::wstring& status) {
+                    // Network reads can arrive thousands of times per second.
+                    // Limit queued UI updates, but show each new phase immediately.
+                    const ULONGLONG now = GetTickCount64();
+                    if (status == lastProgressStatus && now - lastProgressTick < 200) return;
+                    lastProgressTick = now;
+                    lastProgressStatus = status;
                     send(fraction, status, false);
                 }, &error);
                 send(ok ? 1.0 : 0.0, ok ? L"Model ready for offline translation" : error, true);
@@ -1173,7 +1237,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g.hwnd && ctrl(kBuiltInStatus)) {
             std::wstring status = progress->status;
             if (!progress->done) status += L" " + std::to_wstring(int(progress->fraction * 100)) + L"%";
-            SetWindowTextW(ctrl(kBuiltInStatus), status.c_str());
+            // WM_SETTEXT repaints a STATIC even when the text is unchanged.
+            // Keep the label stable between visible percentage changes.
+            if (editText(ctrl(kBuiltInStatus)) != status)
+                SetWindowTextW(ctrl(kBuiltInStatus), status.c_str());
             if (progress->done) {
                 updateBuiltInStatus();
                 if (!builtin::Installed()) SetWindowTextW(ctrl(kBuiltInStatus), status.c_str());
@@ -1184,6 +1251,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_NOTIFY: {
         auto* hdr = (NMHDR*)lp;
+        if (g.dark && !g.highContrast && hdr->code == NM_CUSTOMDRAW) {
+            wchar_t cls[32]{};
+            GetClassNameW(hdr->hwndFrom, cls, (int)std::size(cls));
+            if (_wcsicmp(cls, L"Button") == 0)
+                return drawDarkButton(reinterpret_cast<NMCUSTOMDRAW*>(lp));
+        }
         if (hdr->idFrom == kAboutLinks && (hdr->code == NM_CLICK || hdr->code == NM_RETURN)) {
             auto* link = (NMLINK*)lp;
             ShellExecuteW(nullptr, L"open", link->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
@@ -1279,6 +1352,58 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 } // namespace
 
 namespace SettingsWindow {
+
+bool testNavigationIconColors(bool dark) {
+    const bool previousDark = g.dark;
+    const bool previousHighContrast = g.highContrast;
+    g.dark = dark;
+    g.highContrast = false;
+    const COLORREF expected = textColor();
+    HIMAGELIST images = createTabImages();
+    g.dark = previousDark;
+    g.highContrast = previousHighContrast;
+    if (!images) return false;
+    const int size = px(16);
+    HDC dc = CreateCompatibleDC(nullptr);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    if (!dc || !bitmap) {
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+        ImageList_Destroy(images);
+        return false;
+    }
+    HGDIOBJ old = SelectObject(dc, bitmap);
+    HBRUSH background = CreateSolidBrush(RGB(255, 0, 255));
+    bool ok = ImageList_GetImageCount(images) == 8;
+    for (int i = 0; i < 8 && ok; ++i) {
+        RECT rc{0, 0, size, size};
+        FillRect(dc, &rc, background);
+        ok = ImageList_Draw(images, i, dc, 0, 0, ILD_TRANSPARENT) != FALSE;
+        int strokes = 0;
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const COLORREF color = GetPixel(dc, x, y);
+                if (color == RGB(255, 0, 255)) continue;
+                ++strokes;
+                if (color != expected) ok = false;
+            }
+        }
+        if (!strokes) ok = false;
+    }
+    SelectObject(dc, old);
+    DeleteObject(background);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    ImageList_Destroy(images);
+    return ok;
+}
 
 void open(HWND appWindow) {
     if (g.hwnd) {

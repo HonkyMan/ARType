@@ -4,7 +4,9 @@
 param(
     [string]$Exe = "$PSScriptRoot\..\build\TypeTide.exe",
     [string]$Expected = "MOCK_TRANSLATION_OK",
-    [switch]$Real   # 真实模型：不比对固定译文，轮询等待并做宽松断言
+    [switch]$Real,   # 真实模型：不比对固定译文，轮询等待并做宽松断言
+    [byte]$ReadKey = 0x44,
+    [byte]$RewriteKey = 0x52
 )
 $ErrorActionPreference = "Stop"
 
@@ -19,6 +21,9 @@ public static class Win {
     [DllImport("user32.dll", EntryPoint="SendMessageW")] public static extern IntPtr SendMessageInt(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT rect);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 }
 "@
@@ -88,7 +93,7 @@ Start-Sleep -Milliseconds 300
 Start-Sleep -Milliseconds 300
 
 Write-Output "[e2e] Alt+D → popup"
-Send-Combo @($VK_MENU) 0x44      # Alt+D
+Send-Combo @($VK_MENU) $ReadKey
 
 # 轮询等弹窗出现（真实模型冷启动可能较慢）
 $popup = [IntPtr]::Zero
@@ -116,17 +121,39 @@ if ($popup -ne [IntPtr]::Zero) {
     }
 }
 
-Write-Output "[e2e] Esc closes popup"
-Send-Combo @() $VK_ESCAPE
-Start-Sleep -Milliseconds 800
-Check ([Win]::FindWindowW("TypeTidePopup", $NUL) -eq [IntPtr]::Zero) "popup closed"
+Write-Output "[e2e] hold Replace, drag out to cancel, then release Replace"
+if ($popup -ne [IntPtr]::Zero) {
+    $rect = New-Object Win+RECT
+    [Win]::GetClientRect($popup, [ref]$rect) | Out-Null
+    $scale = [Win]::GetDpiForWindow($popup) / 96.0
+    $x = $rect.Right - [int](50 * $scale)
+    $y = $rect.Bottom - [int](28 * $scale)
+    $point = [IntPtr](($y -shl 16) -bor $x)
+    [Win]::SendMessageInt($popup, 0x0201, [IntPtr]1, $point) | Out-Null
+    Start-Sleep -Milliseconds 500 # Longer than the old 250ms mouse wait.
+    Check ([Win]::FindWindowW("TypeTidePopup", $NUL) -eq $popup) "Replace waits for mouse-up"
+    Check ((Get-WindowText $editHwnd) -eq "你好世界，今天天气很好。") "holding Replace leaves selection unchanged"
+    [Win]::SendMessageInt($popup, 0x0202, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    Check ([Win]::FindWindowW("TypeTidePopup", $NUL) -eq $popup) "release outside cancels Replace"
+    [Win]::SendMessageInt($popup, 0x0201, [IntPtr]1, $point) | Out-Null
+    [Win]::SendMessageInt($popup, 0x0202, [IntPtr]::Zero, $point) | Out-Null
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Milliseconds 100
+        if ((Get-WindowText $editHwnd) -eq $text) { break }
+    }
+    Check ((Get-WindowText $editHwnd) -eq $text) "Replace pastes full translation, not literal V"
+    Start-Sleep -Milliseconds 500
+    Check ((Get-Clipboard -Raw) -eq "剪贴板原始内容") "Replace restores clipboard"
+    Check ([Win]::FindWindowW("TypeTidePopup", $NUL) -eq [IntPtr]::Zero) "Replace closes popup"
+    [Win]::SendMessageW($editHwnd, 0x000C, [IntPtr]::Zero, $sb) | Out-Null
+}
 
 Write-Output "[e2e] Alt+R → rewrite in place"
 Ensure-Foreground $hostHwnd | Out-Null
 Start-Sleep -Milliseconds 300
 [Win]::SendMessageInt($editHwnd, 0x00B1, [IntPtr]::Zero, [IntPtr](-1)) | Out-Null   # EM_SETSEL 全选
 Start-Sleep -Milliseconds 300
-Send-Combo @($VK_MENU) 0x52      # Alt+R
+Send-Combo @($VK_MENU) $RewriteKey
 
 # 轮询等内容被替换
 $content = ""

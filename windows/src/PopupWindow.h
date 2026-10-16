@@ -78,6 +78,7 @@ private:
     int scrollY_ = 0;
 
     Region hover_ = Region::None;
+    bool replacePressed_ = false;
     bool trackingMouse_ = false;
     bool menuOpen_ = false;
 

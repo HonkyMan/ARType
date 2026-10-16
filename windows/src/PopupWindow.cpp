@@ -571,7 +571,10 @@ LRESULT PopupWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case Region::Replace:
-            if (onReplace) onReplace();
+            // Keep the popup alive until the click is complete. Closing on
+            // mouse-down lets its mouse-up reach the editor during paste.
+            replacePressed_ = true;
+            SetCapture(hwnd_);
             return 0;
         case Region::Retry:
             if (onRetry) onRetry();
@@ -580,6 +583,22 @@ LRESULT PopupWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
     }
+    case WM_LBUTTONUP: {
+        const bool pressed = replacePressed_;
+        replacePressed_ = false;
+        const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        const bool replace = pressed && hitTest(pt) == Region::Replace;
+        if (GetCapture() == hwnd_) ReleaseCapture();
+        if (replace && onReplace) onReplace();
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        replacePressed_ = false;
+        return 0;
+    case WM_CANCELMODE:
+        replacePressed_ = false;
+        if (GetCapture() == hwnd_) ReleaseCapture();
+        return 0;
     case WM_TIMER:
         if (wp == kCopiedTimer) {
             KillTimer(hwnd_, kCopiedTimer);

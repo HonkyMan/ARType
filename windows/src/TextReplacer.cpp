@@ -53,16 +53,19 @@ LRESULT CALLBACK ownerProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 /// 工作线程主体：设置延迟渲染剪贴板 → 合成粘贴 → 等目标取数据 → 还原剪贴板
 void replaceWorker(const std::wstring& text, bool selectAll) {
     DWORD started = GetTickCount();
-    clipboard::Snapshot saved = clipboard::Take();
-
-    // Replace can be started by the popup's WM_LBUTTONDOWN handler.  Do not
-    // inject Ctrl+V until that physical click has completed: otherwise the
-    // foreground editor can process the tail of the click between the Ctrl
-    // and V events, leaving a literal "v" behind on some controls.
-    DWORD mouseDeadline = GetTickCount() + 250;
-    while ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) && GetTickCount() < mouseDeadline)
+    // Also guard shortcut-driven replacement while a mouse button is held.
+    // A timeout must cancel, never inject into an unfinished click.
+    DWORD mouseDeadline = GetTickCount() + 2000;
+    while (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+        if (GetTickCount() >= mouseDeadline) {
+            diagnostics::Record("replacement", "failure", {}, {}, "mouseStillPressed",
+                                -1, (int)(GetTickCount() - started), (int)text.size());
+            return;
+        }
         Sleep(5);
+    }
     Sleep(20);
+    clipboard::Snapshot saved = clipboard::Take();
 
     static bool registered = [] {
         WNDCLASSW wc{};
