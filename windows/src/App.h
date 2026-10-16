@@ -32,6 +32,7 @@ public:
     bool init(HINSTANCE inst);
     HWND hwnd() const { return hwnd_; }
     bool shortcutsRegistered() const { return shortcutsReady_; }
+    const std::wstring& shortcutIssue() const { return shortcutIssue_; }
 
     /// 根据开关 + 快捷键 + 划词设置重新装配触发（设置变化后调用）
     void applyEnabledState();
@@ -82,7 +83,7 @@ private:
     std::wstring currentText_;
     RewriteStyle currentStyle_ = RewriteStyle::Faithful;
     bool currentReplaceSelectAll_ = false;    // 弹窗 Replace 时是否先全选
-    bool hotkeyWarningShown_ = false;
+    std::wstring shortcutIssue_;
     bool readShortcutRegistered_ = false;
     bool rewriteShortcutRegistered_ = false;
     bool shortcutsReady_ = false;

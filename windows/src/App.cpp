@@ -68,7 +68,7 @@ bool App::init(HINSTANCE inst) {
 
     // 首次启动：打开设置窗口，让用户立刻完成配置
     Settings& s = Settings::shared();
-    if (!s.hasCompletedFirstLaunch) {
+    if (!s.hasCompletedFirstLaunch || !shortcutIssue_.empty()) {
         openSettings();
     }
 
@@ -89,19 +89,20 @@ void App::applyEnabledState() {
     readShortcutRegistered_ = false;
     rewriteShortcutRegistered_ = false;
     shortcutsReady_ = false;
+    shortcutIssue_.clear();
 
     const Settings& s = Settings::shared();
-    if (!s.enabled) return;
+    if (!s.enabled) {
+        SettingsWindow::refreshShortcutStatus();
+        return;
+    }
 
     if (s.readShortcut.isConfigured() && s.rewriteShortcut.isConfigured()
         && s.readShortcut == s.rewriteShortcut) {
         diagnostics::Record("shortcutRegistration", "failure", {}, {}, "duplicate");
-        if (!hotkeyWarningShown_) {
-            hotkeyWarningShown_ = true;
-            MessageBoxW(nullptr,
-                        L"Translate and rewrite must use different shortcuts. Choose a different combination in Settings → Shortcuts.",
-                        L"TypeTide — duplicate shortcuts", MB_OK | MB_ICONWARNING);
-        }
+        shortcutIssue_ = L"Translate and rewrite use the same shortcut. Choose different combinations below.";
+        SettingsWindow::refreshShortcutStatus();
+        setupSelectionTrigger();
         return;
     }
 
@@ -110,27 +111,28 @@ void App::applyEnabledState() {
     bool ok1 = !readConfigured || RegisterHotKey(hwnd_, kReadHotkeyId,
                                                  s.readShortcut.modifiers | MOD_NOREPEAT,
                                                  s.readShortcut.vk);
+    const DWORD readError = ok1 ? ERROR_SUCCESS : GetLastError();
     bool ok2 = !rewriteConfigured || RegisterHotKey(hwnd_, kRewriteHotkeyId,
                                                     s.rewriteShortcut.modifiers | MOD_NOREPEAT,
                                                     s.rewriteShortcut.vk);
-    readShortcutRegistered_ = ok1;
-    rewriteShortcutRegistered_ = ok2;
+    const DWORD rewriteError = ok2 ? ERROR_SUCCESS : GetLastError();
+    readShortcutRegistered_ = readConfigured && ok1;
+    rewriteShortcutRegistered_ = rewriteConfigured && ok2;
     shortcutsReady_ = (readConfigured || rewriteConfigured) && ok1 && ok2;
     diagnostics::Record("shortcutRegistration", shortcutsReady_ ? "success" : "failure",
                         {}, {}, shortcutsReady_ ? "" :
                                   (!readConfigured && !rewriteConfigured ? "notConfigured" : "unavailable"));
-    if ((!ok1 || !ok2) && !hotkeyWarningShown_) {
-        hotkeyWarningShown_ = true;
-        std::wstring unavailable;
-        if (readConfigured && !ok1) unavailable += L"Translate selection: " + s.readShortcut.displayString();
-        if (!ok1 && !ok2) unavailable += L"\n";
-        if (rewriteConfigured && !ok2) unavailable += L"Rewrite & replace: " + s.rewriteShortcut.displayString();
-        std::wstring message = L"These shortcuts could not be registered:\n\n" + unavailable +
-                               L"\n\nChoose different shortcuts in Settings → Shortcuts.";
-        MessageBoxW(nullptr, message.c_str(),
-                    L"TypeTide — shortcut unavailable", MB_OK | MB_ICONWARNING);
-    }
-    if (ok1 && ok2) hotkeyWarningShown_ = false;
+    auto unavailable = [&](const wchar_t* action, const Hotkey& shortcut, DWORD error) {
+        if (!shortcutIssue_.empty()) shortcutIssue_ += L"\n";
+        shortcutIssue_ += std::wstring(action) + L": " + shortcut.displayString();
+        shortcutIssue_ += error == ERROR_HOTKEY_ALREADY_REGISTERED
+            ? L" is in use by another application."
+            : L" could not register (Windows error " + std::to_wstring(error) + L").";
+        util::Log("shortcut registration failed action=%ls error=%lu", action, error);
+    };
+    if (!ok1) unavailable(L"Translate selection", s.readShortcut, readError);
+    if (!ok2) unavailable(L"Rewrite & replace", s.rewriteShortcut, rewriteError);
+    SettingsWindow::refreshShortcutStatus();
 
     setupSelectionTrigger();
 }
@@ -154,7 +156,7 @@ void App::setupSelectionTrigger() {
 }
 
 void App::openSettings() {
-    SettingsWindow::open(hwnd_);
+    SettingsWindow::open(hwnd_, !shortcutIssue_.empty());
 }
 
 void App::quit() {

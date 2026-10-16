@@ -54,7 +54,7 @@ enum CtrlId : int {
     kHkReadLabel, kHkRead, kReadWin, kHkReadClear,
     kHkRewriteLabel, kHkRewrite, kRewriteWin, kHkRewriteClear,
     kReadActionLabel, kReadAction, kRewriteActionLabel, kRewriteAction,
-    kHkRestoreDefaults, kHkVerify, kHkNote,
+    kHkRestoreDefaults, kHkVerify, kHkNote, kHkStatus,
     // Behavior
     kTriggerLabel, kTrigger, kPreview,
     kReadStyleLabel, kReadStyle, kRewriteStyleLabel, kRewriteStyle,
@@ -678,6 +678,7 @@ void buildPages() {
         make(L"BUTTON", L"Verify shortcuts", WS_TABSTOP | BS_PUSHBUTTON, x + 130, y + 150, 120, 28, kHkVerify),
         makeLabel(L"Changes apply immediately. Keep at least one shortcut; configured shortcuts must be different.",
                   x, y + 190, w, kHkNote),
+        make(L"STATIC", L"", SS_LEFT, x, y + 218, w, 90, kHkStatus),
     };
     g.pages[3].insert(g.pages[3].end(), controls.begin(), controls.end());
     }
@@ -1071,13 +1072,7 @@ void onCommand(int id, int code) {
         applyToApp();
         g.shortcutsReady = App::shared().shortcutsRegistered();
         updateFirstRunCompletion();
-        MessageBoxW(g.hwnd,
-                    g.shortcutsReady ? L"Every configured shortcut is registered and ready."
-                                     : (!s.readShortcut.isConfigured() && !s.rewriteShortcut.isConfigured()
-                                        ? L"Set at least one shortcut so TypeTide can be triggered from the keyboard."
-                                        : L"One or more shortcuts are unavailable. Choose a different combination."),
-                    L"TypeTide — shortcut verification",
-                    MB_OK | (g.shortcutsReady ? MB_ICONINFORMATION : MB_ICONWARNING));
+        SettingsWindow::refreshShortcutStatus();
         save = false;
         break;
 
@@ -1405,8 +1400,26 @@ bool testNavigationIconColors(bool dark) {
     return ok;
 }
 
-void open(HWND appWindow) {
+void refreshShortcutStatus() {
+    if (!g.hwnd || !ctrl(kHkStatus)) return;
+    const auto& app = App::shared();
+    g.shortcutsReady = app.shortcutsRegistered();
+    std::wstring status;
+    if (!Settings::shared().enabled) status = L"TypeTide is disabled. Enable it to register shortcuts.";
+    else if (!app.shortcutIssue().empty())
+        status = app.shortcutIssue() + L"\nChoose another combination, then click Verify shortcuts to retry.";
+    else if (g.shortcutsReady) status = L"Every configured shortcut is registered and ready.";
+    else status = L"Set at least one shortcut to use TypeTide from the keyboard.";
+    SetWindowTextW(ctrl(kHkStatus), status.c_str());
+}
+
+void open(HWND appWindow, bool showShortcuts) {
     if (g.hwnd) {
+        refreshShortcutStatus();
+        if (showShortcuts) {
+            SendMessageW(ctrl(kTab), LB_SETCURSEL, 3, 0);
+            showPage(3);
+        }
         ShowWindow(g.hwnd, SW_SHOWNORMAL);
         SetForegroundWindow(g.hwnd);
         return;
@@ -1485,8 +1498,11 @@ void open(HWND appWindow) {
 
     buildPages();
     applyTheme(g.hwnd);
-    showPage(0);
+    const int initialPage = showShortcuts ? 3 : 0;
+    SendMessageW(ctrl(kTab), LB_SETCURSEL, initialPage, 0);
+    showPage(initialPage);
     g.loading = false;
+    refreshShortcutStatus();
 
     // 异步填充 Ollama 模型下拉框
     fetchOllamaModelsAsync();
