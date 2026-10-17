@@ -1168,7 +1168,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             account::FetchProfile(hwnd,kMsgAccount,u->token);
         }
         if(u->profile.isObject())SettingsWindow::applyAccountProfile(u->profile);
-return 0;
+        return 0;
     }
     case WM_COMMAND:
         onCommand(LOWORD(wp), HIWORD(wp));
@@ -1356,21 +1356,29 @@ return 0;
 namespace SettingsWindow {
 
 void applyAccountProfile(const json::Value& profile) {
-            auto& s=Settings::shared();g.tenants.clear();SendMessageW(ctrl(kAccountTenant),CB_RESETCONTENT,0,0);
-            const auto* tenants=profile["tenants"].array();int selected=-1;
-            if(tenants)for(const auto& t:*tenants){
-                int index=(int)g.tenants.size();g.tenants.push_back(t["id"].asString());
-                SendMessageW(ctrl(kAccountTenant),CB_ADDSTRING,0,(LPARAM)util::Widen(t["name"].asString()).c_str());
-                if(t["id"].asString()==s.tenantId)selected=index;
-            }
-            if(selected<0&&!g.tenants.empty())selected=0;
-            if(selected>=0){SendMessageW(ctrl(kAccountTenant),CB_SETCURSEL,selected,0);s.tenantId=g.tenants[selected];}
-            else s.tenantId.clear();
-            s.hasCompletedFirstLaunch=true;s.save();
-            std::wstring text=util::Widen(profile["user"]["email"].asString());
-            text+=g.tenants.empty()?L"\nНет организаций. Попросите администратора пригласить этот email.":L"\nВыберите рабочую организацию ниже.";
-            SetWindowTextW(ctrl(kAccountMessage),text.c_str());
-
+    auto& s=Settings::shared();
+    const auto previousTenant=s.tenantId;
+    g.tenants.clear();
+    SendMessageW(ctrl(kAccountTenant),CB_RESETCONTENT,0,0);
+    const auto* tenants=profile["tenants"].array();
+    int selected=-1;
+    if(tenants)for(const auto& t:*tenants){
+        const int index=(int)g.tenants.size();
+        g.tenants.push_back(t["id"].asString());
+        SendMessageW(ctrl(kAccountTenant),CB_ADDSTRING,0,(LPARAM)util::Widen(t["name"].asString()).c_str());
+        if(t["id"].asString()==s.tenantId)selected=index;
+    }
+    if(selected<0&&!g.tenants.empty())selected=0;
+    if(selected>=0){
+        SendMessageW(ctrl(kAccountTenant),CB_SETCURSEL,selected,0);
+        s.tenantId=g.tenants[selected];
+    } else s.tenantId.clear();
+    if(s.tenantId!=previousTenant)App::shared().cancelTranslations();
+    s.hasCompletedFirstLaunch=true;
+    s.save();
+    std::wstring text=util::Widen(profile["user"]["email"].asString());
+    text+=g.tenants.empty()?L"\nНет организаций. Попросите администратора пригласить этот email.":L"\nВыберите рабочую организацию ниже.";
+    SetWindowTextW(ctrl(kAccountMessage),text.c_str());
 }
 
 bool testNavigationIconColors(bool dark) {
