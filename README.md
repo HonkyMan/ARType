@@ -44,7 +44,8 @@ docker compose ps
 ```
 
 Замените путь и email своими. Setup создаёт приватный `.env` с правами 600,
-генерирует пароль PostgreSQL и импортирует Google client ID/secret. Секреты
+генерирует отдельные пароль PostgreSQL и ключ шифрования AI-ключей, импортирует
+Google client ID/secret. Секреты
 не печатаются, существующий `.env` не перезаписывается. Скрипт использует
 Docker image `node:24-bookworm-slim`; первый запуск и сборка требуют интернета.
 
@@ -57,9 +58,15 @@ Docker image `node:24-bookworm-slim`; первый запуск и сборка 
 
 С флагом `--domain translate.company.com` выбирается HTTPS/Caddy `compose.yaml`.
 Redirect тогда равен `https://translate.company.com/auth/google/callback`.
-Для импорта AI-ключа добавьте `--provider-key-file /absolute/path/provider-key.txt`;
-alias будет `main`. Без ключа кабинет работает, перевод требует заполнить
-`PROVIDER_KEYS` в `.env` и пересоздать API. Модель выбирается в организации.
+После Google-входа откройте **AI-провайдер**, введите API-ключ и сохраните
+подключение `main`. Ключ можно менять там же без перезапуска сервера. Значение
+не возвращается в браузер; PostgreSQL хранит его в AES-256-GCM шифротексте.
+Модель новых организаций — `google/gemma-3-4b-it`; задайте другую через
+`--model MODEL_ID` или в правилах конкретной организации.
+
+Для первоначального импорта из файла также поддерживается
+`--provider-key-file /absolute/path/provider-key.txt`; alias будет `main`.
+Подключение, сохранённое в кабинете, перекрывает одноимённое из окружения.
 
 Для переноса локальной установки на домен сохраните дамп и `.env`, перенесите
 данные, измените `COMPOSE_FILE=compose.yaml`, `DOMAIN` и `PUBLIC_URL`, добавьте
@@ -76,11 +83,13 @@ openssl rand -hex 32
 ```
 
 В `.env` задайте DOMAIN, сгенерированный POSTGRES_PASSWORD, ADMIN_EMAILS,
-Google client ID/secret, PROVIDER_BASE_URL и PROVIDER_KEYS. Пароль базы должен
+Google client ID/secret, PROVIDER_BASE_URL и CREDENTIAL_ENCRYPTION_KEY. Последний —
+отдельные 32 случайных байта в hex (`openssl rand -hex 32`). PROVIDER_KEYS можно
+оставить пустым и ввести AI-ключ через кабинет. Пароль базы должен
 быть URL-safe: hex выше подходит. ADMIN_EMAILS — доверенные операторы всего
 сервиса, разделённые запятыми. Владельцев продуктов в этот список не добавляйте.
 
-PROVIDER_KEYS — JSON вида `{"main":"ключ"}`. Сотрудники ключ не получают;
+Дополнительный источник ключей PROVIDER_KEYS — JSON вида `{"main":"ключ"}`. Сотрудники ключ не получают;
 в кабинете выбирается только alias `main`. Можно задать несколько aliases.
 Один сервер использует один OpenAI-совместимый PROVIDER_BASE_URL; модель
 задаётся отдельно для каждой организации.

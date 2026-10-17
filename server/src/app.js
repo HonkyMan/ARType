@@ -1,9 +1,10 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { access, activateMemberships, audit, fail, HttpError, operator, reserve, transaction, uid } from './store.js';
+import { access, activateMemberships, audit, credentialList, fail, HttpError, operator, reserve, transaction, uid } from './store.js';
 import { hash, installAuth } from './auth.js';
 import { providerPayload } from './provider.js';
+import {encryptCredential} from './credentials.js';
 
 const languages=['en','ru','zh','hi','es','fr','ar','bn','pt','id'];
 const uuid=z.string().uuid();
@@ -52,7 +53,22 @@ export function createApp({pool,config,google,translate}) {
     if(!operator(req.user,config))fail(403,'operator_required','Требуются права оператора.');
     const r=await pool.query(`SELECT t.*,(SELECT count(*)::int FROM memberships WHERE tenant_id=t.id AND ${isSeated}) AS used_seats,
       COALESCE((SELECT sum(characters) FROM usage WHERE tenant_id=t.id AND status='success' AND created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),0)::bigint AS used_characters FROM tenants t ORDER BY created_at`);
-    res.json({tenants:r.rows,credentials:Object.keys(config.providerKeys)});
+    res.json({tenants:r.rows,credentials:(await credentialList(pool,config)).map(c=>c.alias),default_model:config.defaultModel||''});
+  });
+  app.get('/api/provider-credentials',async(req,res)=>{
+    if(!operator(req.user,config))fail(403,'operator_required','Требуются права оператора.');
+    res.json({credentials:await credentialList(pool,config),can_manage:!!config.credentialEncryptionKey,provider_base_url:config.providerBaseURL,default_model:config.defaultModel||''});
+  });
+  app.put('/api/provider-credentials/:alias',async(req,res)=>{
+    if(!operator(req.user,config))fail(403,'operator_required','Требуются права оператора.');
+    const alias=validate(settings.shape.credential,req.params.alias);
+    const {key}=validate(z.object({key:z.string().trim().min(1).max(4096).regex(/^[^\s\x00-\x1f\x7f]+$/)}).strict(),req.body);
+    if(!config.credentialEncryptionKey)fail(503,'encryption_not_configured','Нужно задать CREDENTIAL_ENCRYPTION_KEY в конфигурации сервера и пересоздать API.');
+    const ciphertext=encryptCredential(key,config.credentialEncryptionKey,alias);
+    await transaction(pool,async c=>{
+      await c.query('INSERT INTO provider_credentials(alias,ciphertext,updated_by) VALUES($1,$2,$3) ON CONFLICT(alias) DO UPDATE SET ciphertext=$2,updated_by=$3,updated_at=now()',[alias,ciphertext,req.user.id]);
+      await audit(c,req.user,'provider.credential.update',null);
+    });res.json({ok:true});
   });
   app.post('/api/tenants',async(req,res)=>{
     if(!operator(req.user,config))fail(403,'operator_required','Требуются права оператора.');
@@ -132,7 +148,7 @@ export function createApp({pool,config,google,translate}) {
     const reserved=await reserve(pool,req.user,b,config);const start=Date.now();
     let result;
     try {
-      result=await translate(providerPayload(b,reserved.tenant),reserved.tenant.credential);
+      result=await translate(providerPayload(b,reserved.tenant),reserved.tenant.credential,reserved.providerKey);
       if(typeof result.text!=='string' || !result.text.trim())throw new Error('Empty response');
       await pool.query("UPDATE usage SET status='success',input_tokens=$1,output_tokens=$2,duration_ms=$3 WHERE id=$4",[result.input_tokens||0,result.output_tokens||0,Date.now()-start,reserved.id]);
     }catch{

@@ -14,11 +14,11 @@ try{
   const {values}=parseArgs({options:{
     'google-json':{type:'string'},'admin-email':{type:'string'},domain:{type:'string'},
     port:{type:'string',default:'8080'},'provider-key-file':{type:'string'},
-    'provider-url':{type:'string',default:'https://openrouter.ai/api/v1'},
+    'provider-url':{type:'string',default:'https://openrouter.ai/api/v1'},model:{type:'string',default:'google/gemma-3-4b-it'},
     directory:{type:'string',default:process.cwd()},help:{type:'boolean'}
   }});
   if(values.help){
-    console.log('deployment/setup.sh --google-json FILE --admin-email EMAIL [--domain HOST] [--port 8080] [--provider-key-file FILE] [--provider-url HTTPS_URL]');
+    console.log('deployment/setup.sh --google-json FILE --admin-email EMAIL [--domain HOST] [--port 8080] [--provider-key-file FILE] [--provider-url HTTPS_URL] [--model MODEL_ID]');
     process.exit(0);
   }
   const email=text(values['admin-email'],'Specify --admin-email').trim().toLowerCase();
@@ -44,14 +44,15 @@ try{
   const config={COMPOSE_FILE:domain?'compose.yaml':'compose.local.yaml',DOMAIN:domain,
     PUBLIC_URL:origin,ARTYPE_LOCAL_PORT:String(port),POSTGRES_PASSWORD:randomBytes(32).toString('hex'),
     ADMIN_EMAILS:email,GOOGLE_CLIENT_ID:clientId,GOOGLE_CLIENT_SECRET:clientSecret,
-    PROVIDER_BASE_URL:provider.href.replace(/\/$/,''),PROVIDER_KEYS:JSON.stringify(keys)};
+    PROVIDER_BASE_URL:provider.href.replace(/\/$/,''),PROVIDER_KEYS:JSON.stringify(keys),
+    CREDENTIAL_ENCRYPTION_KEY:randomBytes(32).toString('hex'),DEFAULT_MODEL:text(values.model,'Invalid model')};
   const content='# Private ARType Docker configuration. Do not commit or share.\n'+Object.entries(config).map(([key,value])=>`${key}=${quote(value)}\n`).join('');
   try{writeFileSync(resolve(values.directory,'.env'),content,{flag:'wx',mode:0o600});}
   catch(error){if(error.code==='EEXIST')throw new Error('.env already exists; nothing changed. Edit it manually to preserve the database password.');throw new Error('Cannot create private .env');}
   console.log(`Created private .env (${domain?'HTTPS domain':'local-only'}). Secrets were not printed.`);
   console.log(`Google Cloud → Clients → Authorized redirect URIs: ${origin}/auth/google/callback`);
   console.log('If consent screen is in Testing, add the administrator to Audience → Test users.');
-  console.log(Object.keys(keys).length?'AI provider key imported under alias main.':'AI key is not configured; add PROVIDER_KEYS before translating.');
+  console.log(Object.keys(keys).length?'AI provider key imported under alias main.':'AI key is not configured; sign in and save it in the AI provider panel.');
   console.log('Start: docker compose up -d --build');
   console.log(`Open: ${origin}`);
 }catch(error){

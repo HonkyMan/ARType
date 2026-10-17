@@ -23,6 +23,11 @@ test('real HTTP adapter sends only server credential and returns validated trans
   assert.equal(received.path,'/v1/chat/completions');assert.equal(received.authorization,'Bearer server-key');
   assert.equal(received.body.model,'chosen-model');
 });
+test('credential resolved from encrypted storage overrides the legacy environment key in HTTP authorization',async()=>{
+  mode='success';await makeTranslator({providerBaseURL:base,providerKeys:{main:'old-environment-key'}})({model:'chosen-model',messages:[]},'main','current-database-key');
+  assert.equal(received.authorization,'Bearer current-database-key');
+  assert.ok(!JSON.stringify(received.body).includes('current-database-key'));
+});
 test('actual provider failures, redirects, broken bodies and truncated completions never return partial text',async()=>{
   for(const state of ['failure','partial','redirect','truncated','error','tools','no_finish','choice_error']){mode=state;await assert.rejects(run(),state);}
 });

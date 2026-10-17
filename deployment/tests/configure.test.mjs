@@ -21,6 +21,8 @@ test('imports web OAuth into private local configuration without printing secret
   assert.match(env,/COMPOSE_FILE="compose.local.yaml"/);
   assert.match(env,/ADMIN_EMAILS="owner@example.com"/);
   assert.match(env,/POSTGRES_PASSWORD="[a-f0-9]{64}"/);
+  assert.match(env,/CREDENTIAL_ENCRYPTION_KEY="[a-f0-9]{64}"/);
+  assert.match(env,/DEFAULT_MODEL="google\/gemma-3-4b-it"/);
   assert.match(env,/GOOGLE_CLIENT_SECRET="fake-secret-for-test"/);
   assert.match(result.stdout,/http:\/\/127\.0\.0\.1:8080\/auth\/google\/callback/);
   assert.match(result.stdout,/Google Cloud/);

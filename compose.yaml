@@ -28,6 +28,8 @@ services:
       ADMIN_EMAILS: ${ADMIN_EMAILS:?Set ADMIN_EMAILS in .env}
       PROVIDER_BASE_URL: ${PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
       PROVIDER_KEYS: ${PROVIDER_KEYS:-\{\}}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-google/gemma-3-4b-it}
       TRUST_PROXY: '1'
     read_only: true
     tmpfs: [/tmp]

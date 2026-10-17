@@ -12,7 +12,7 @@ while (($#)); do
       file="$(cd "$(dirname "$file")" && pwd -P)/$(basename "$file")"
       if [[ "$flag" = --google-json ]]; then target=/run/artype/google.json; else target=/run/artype/provider-key; fi
       docker_command+=(-v "$file:$target:ro");args+=("$flag" "$target");shift 2;;
-    --admin-email|--domain|--port|--provider-url)
+    --admin-email|--domain|--port|--provider-url|--model)
       args+=("$1" "${2:?Missing option value}");shift 2;;
     --help) args+=(--help);shift;;
     *) echo 'Unknown option. Run deployment/setup.sh --help.' >&2;exit 2;;

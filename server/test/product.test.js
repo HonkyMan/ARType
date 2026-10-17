@@ -8,8 +8,8 @@ import { migrate } from '../src/store.js';
 const pool = new pg.Pool({connectionString: process.env.TEST_DATABASE_URL});
 const origin = 'http://127.0.0.1:43189';
 const config = {origin, adminEmails:['operator@example.com'], googleClientId:'test-client', googleClientSecret:'test-secret',
-  providerKeys:{main:'server-only-key'}, providerBaseURL:'https://example.com/v1', secure:false};
-let server, url, upstreamCalls, upstreamFail, googleClaims;
+  providerKeys:{main:'server-only-key'}, providerBaseURL:'https://example.com/v1', credentialEncryptionKey:'ab'.repeat(32),secure:false};
+let server, url, upstreamCalls, upstreamCredentials, upstreamFail, googleClaims;
 const claimsByCode=new Map();
 const hash = s => createHash('sha256').update(s).digest('hex');
 async function actor(email) {
@@ -32,14 +32,48 @@ before(async()=>{
   assert.match(new URL(process.env.TEST_DATABASE_URL).pathname, /_test$/, 'Test database must end in _test');
   await migrate(pool);
   server=createApp({pool,config,google:{authorizationURL:({state})=>`https://accounts.google.com/o/oauth2/v2/auth?state=${state}`,
-    exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload)=>{
-      upstreamCalls.push(payload); if(upstreamFail)throw new Error('provider internal secret');
+    exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload,alias,key)=>{
+      upstreamCalls.push(payload);upstreamCredentials.push(key); if(upstreamFail)throw new Error('provider internal secret');
       await new Promise(r=>setTimeout(r,30)); return {text:'Hello world',input_tokens:10,output_tokens:3};
     }}).listen(0,'127.0.0.1');
   await new Promise(r=>server.once('listening',r)); url=`http://127.0.0.1:${server.address().port}`;
 });
 after(async()=>{if(server)await new Promise(r=>server.close(r)); await pool.end()});
-beforeEach(async()=>{await pool.query('TRUNCATE users,tenants,memberships,sessions,oauth_states,devices,usage,audit RESTART IDENTITY CASCADE');upstreamCalls=[];upstreamFail=false;});
+beforeEach(async()=>{await pool.query('TRUNCATE users,tenants,memberships,sessions,oauth_states,devices,usage,audit RESTART IDENTITY CASCADE');upstreamCalls=[];upstreamCredentials=[];upstreamFail=false;});
+
+test('only operator stores encrypted provider keys; rotation applies to the next translation without leaking keys',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const path='/api/provider-credentials/managed';const key='private-test-provider-key';
+  assert.equal((await call(path,{actor:owner,method:'PUT',body:{key}})).status,403);
+  assert.equal((await call('/api/provider-credentials',{actor:owner})).status,403);
+  assert.equal((await call(path,{method:'PUT',body:{key},headers:{Cookie:`artype_session=${op.token}`}})).status,403);
+  const saved=await call(path,{actor:op,method:'PUT',body:{key}});assert.equal(saved.status,200);
+  assert.ok(!JSON.stringify(saved.data).includes(key));
+  const listing=await call('/api/provider-credentials',{actor:op});assert.equal(listing.status,200);
+  assert.ok(listing.data.credentials.some(c=>c.alias==='managed'&&c.source==='admin'));
+  assert.ok(!JSON.stringify(listing.data).includes(key));
+  const row=(await pool.query("SELECT ciphertext FROM provider_credentials WHERE alias='managed'")).rows[0];
+  assert.ok(row.ciphertext.length>30&&!row.ciphertext.includes(key));
+  const t=await tenant(op,'owner@example.com',{credential:'managed'});
+  const request=()=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'en'}});
+  assert.equal((await request()).status,200);assert.equal(upstreamCredentials.at(-1),key);
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'rotated-private-key'}})).status,200);
+  assert.equal((await request()).status,200);assert.equal(upstreamCredentials.at(-1),'rotated-private-key');
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{key:''}})).status,422);
+  assert.ok(!JSON.stringify((await call('/api/tenants',{actor:op})).data).includes('rotated-private-key'));
+  assert.ok(!JSON.stringify((await pool.query('SELECT * FROM audit')).rows).includes(key));
+});
+
+test('missing encryption key and corrupted stored credentials fail before any provider request or usage reservation',async()=>{
+  const op=await actor('operator@example.com');const path='/api/provider-credentials/managed';
+  const master=config.credentialEncryptionKey;config.credentialEncryptionKey='';
+  try{assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'private-test-key'}})).status,503)}finally{config.credentialEncryptionKey=master}
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'private-test-key'}})).status,200);
+  const t=await tenant(op,'operator@example.com',{credential:'managed'});
+  await pool.query("UPDATE provider_credentials SET ciphertext='corrupted' WHERE alias='managed'");
+  assert.equal((await call('/api/translate',{actor:op,method:'POST',body:{tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'en'}})).status,503);
+  assert.equal(upstreamCalls.length,0);assert.equal((await pool.query('SELECT count(*)::int n FROM usage')).rows[0].n,0);
+});
 
 test('unauthenticated requests and missing CSRF cannot change organizations',async()=>{
   assert.equal((await call('/api/tenants')).status,401);

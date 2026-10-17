@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import {decryptCredential} from './credentials.js';
 
 export class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status=status; this.code=code; }
@@ -55,6 +56,10 @@ export async function migrate(pool) {
         id uuid PRIMARY KEY, actor_id uuid NOT NULL REFERENCES users(id), action text NOT NULL,
         tenant_id uuid, created_at timestamptz NOT NULL DEFAULT now());
       INSERT INTO schema_versions(version) VALUES(1) ON CONFLICT DO NOTHING;
+      CREATE TABLE IF NOT EXISTS provider_credentials(
+        alias text PRIMARY KEY, ciphertext text NOT NULL,
+        updated_by uuid NOT NULL REFERENCES users(id), updated_at timestamptz NOT NULL DEFAULT now());
+      INSERT INTO schema_versions(version) VALUES(2) ON CONFLICT DO NOTHING;
     `);
   } finally {await c.query('SELECT pg_advisory_unlock(63821017)');c.release()}
 }
@@ -73,6 +78,11 @@ export async function access(c,tenantId,user,config,{manage=false,lock=false}={}
 export async function audit(c,user,action,tenantId) {
   await c.query('INSERT INTO audit(id,actor_id,action,tenant_id) VALUES($1,$2,$3,$4)',[uid(),user.id,action,tenantId]);
 }
+export async function credentialList(c,config){
+  const rows=(await c.query('SELECT alias,updated_at FROM provider_credentials ORDER BY alias')).rows;
+  const saved=new Set(rows.map(r=>r.alias));
+  return [...rows.map(r=>({...r,source:'admin'})),...Object.keys(config.providerKeys).filter(k=>config.providerKeys[k]&&!saved.has(k)).map(alias=>({alias,source:'environment',updated_at:null}))];
+}
 export async function reserve(pool,user,body,config) {
   return transaction(pool,async c=>{
     const t=await access(c,body.tenant_id,user,config,{lock:true});
@@ -80,7 +90,13 @@ export async function reserve(pool,user,body,config) {
     const n=Array.from(body.text).length;
     if(n>t.max_text) fail(422,'text_too_long',`Максимальная длина текста: ${t.max_text} символов.`);
     if(!t.languages.includes(body.target) || (body.source && !t.languages.includes(body.source))) fail(422,'language_not_allowed','Этот язык не разрешён в организации.');
-    if(!config.providerKeys[t.credential]) fail(503,'provider_not_configured','Администратор ещё не подключил провайдера перевода.');
+    const saved=(await c.query('SELECT ciphertext FROM provider_credentials WHERE alias=$1',[t.credential])).rows[0];
+    let providerKey=config.providerKeys[t.credential];
+    if(saved){
+      try{providerKey=decryptCredential(saved.ciphertext,config.credentialEncryptionKey,t.credential)}
+      catch{fail(503,'credential_unavailable','Не удалось прочитать ключ AI. Оператору нужно проверить ключ шифрования сервера.');}
+    }
+    if(!providerKey) fail(503,'provider_not_configured','Администратор ещё не подключил провайдера перевода.');
     if((await c.query('SELECT id FROM usage WHERE user_id=$1 AND request_id=$2',[user.id,body.request_id])).rowCount) fail(409,'already_processed','Этот запрос уже обработан. Повторите действие вручную.');
     const sums=(await c.query(`SELECT
       COALESCE(sum(characters) FILTER(WHERE created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND (status='success' OR (status='pending' AND created_at>now()-interval '70 seconds'))),0)::bigint AS used,
@@ -92,6 +108,6 @@ export async function reserve(pool,user,body,config) {
     if(sums.rpm>=t.rpm || sums.pending>=t.concurrency || sums.personal>=2) fail(429,'busy','Слишком много запросов. Повторите через минуту.');
     const id=uid();
     await c.query("INSERT INTO usage(id,tenant_id,user_id,request_id,characters,status) VALUES($1,$2,$3,$4,$5,'pending')",[id,t.id,user.id,body.request_id,n]);
-    return {id,tenant:t};
+    return {id,tenant:t,providerKey};
   });
 }
