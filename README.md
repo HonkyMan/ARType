@@ -28,6 +28,47 @@
 Нужны Linux с Docker Compose, домен, DNS A/AAAA на сервер и открытые TCP 80/443.
 Не создавайте AAAA без работающего IPv6. База и API наружу не публикуются.
 
+Домен можно купить позднее: локальный режим ниже запускается только на том
+компьютере, где работает Docker. Сотрудникам на других устройствах нужен общий
+HTTPS-сервис.
+
+### Настройка из Google JSON
+
+Распакуйте серверный архив и откройте терминал в `ARType-server`.
+Нужны только Docker и Compose; Node на сервер устанавливать не нужно.
+
+```bash
+deployment/setup.sh --google-json /absolute/path/google-client.json --admin-email admin@company.com
+docker compose up -d --build
+docker compose ps
+```
+
+Замените путь и email своими. Setup создаёт приватный `.env` с правами 600,
+генерирует пароль PostgreSQL и импортирует Google client ID/secret. Секреты
+не печатаются, существующий `.env` не перезаписывается. Скрипт использует
+Docker image `node:24-bookworm-slim`; первый запуск и сборка требуют интернета.
+
+Без `--domain` выбирается `compose.local.yaml`, кабинет доступен на
+`http://127.0.0.1:8080`. База не публикуется, API слушает только loopback.
+В Google Auth Platform → Clients → Web client → Authorized redirect URIs
+сохраните **точно** `http://127.0.0.1:8080/auth/google/callback`.
+Если Google audience — Testing, добавьте email оператора в Test users.
+Импорт JSON сам по себе настройки в Google Cloud не меняет.
+
+С флагом `--domain translate.company.com` выбирается HTTPS/Caddy `compose.yaml`.
+Redirect тогда равен `https://translate.company.com/auth/google/callback`.
+Для импорта AI-ключа добавьте `--provider-key-file /absolute/path/provider-key.txt`;
+alias будет `main`. Без ключа кабинет работает, перевод требует заполнить
+`PROVIDER_KEYS` в `.env` и пересоздать API. Модель выбирается в организации.
+
+Для переноса локальной установки на домен сохраните дамп и `.env`, перенесите
+данные, измените `COMPOSE_FILE=compose.yaml`, `DOMAIN` и `PUBLIC_URL`, добавьте
+HTTPS redirect в Google Cloud и выполните `docker compose up -d --build`.
+Не генерируйте новый пароль для существующего volume. Клиенты пересобираются
+с конечным URL. Локальный HTTP callback можно оставить для разработки.
+
+### Ручная настройка HTTPS
+
 ```bash
 cp .env.example .env
 chmod 600 .env
@@ -100,6 +141,9 @@ Windows требует Visual Studio C++/Windows SDK, CMake и Inno Setup 6:
 Для подписанного выпуска передайте CertificateThumbprint вместо Validation;
 signtool должен быть в PATH. Подписываются EXE приложения и установщика.
 На Mac сотрудник вручную выдаёт Accessibility в системных настройках.
+Пока сертификатов нет, используйте validation-сборки для ручного пилота.
+macOS Gatekeeper и Windows SmartScreen могут запросить подтверждение запуска;
+подпись/notarization для обычной массовой раздачи остаются отдельным этапом.
 Обновления пока выдаются администратором новыми установщиками; upstream канал
 TypeTide отключён. Полный MIT notice включён в пакеты.
 
@@ -117,6 +161,15 @@ Mac: `xcodebuild -project macos/TypeTide.xcodeproj -scheme TypeTide -configurati
 Внутреннее имя схемы сохранено; bundle/executable называются ARType.
 Windows: `ARType.exe --selftest`. GitHub Actions проверяет обе платформы и сервер.
 CI-пакеты с loopback URL предназначены только для проверки.
+
+Серверный Docker-пакет из текущего commit:
+
+```bash
+scripts/package-artype-server.sh
+```
+
+В архив попадают только сервер, Compose, deployment-скрипты и документация.
+`.env`, OAuth JSON, AI-ключи, локальные данные и node_modules не включаются.
 
 См. [эксплуатацию](docs/OPERATIONS.md) и [приёмку](docs/ACCEPTANCE.md).
 Исходные тексты, промпты и переводы не сохраняются в базе или логах API.

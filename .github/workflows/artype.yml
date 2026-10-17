@@ -34,6 +34,8 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://artype:test-only@127.0.0.1:5432/artype_test
       - run: g++ -std=c++20 -I windows/src windows/tests/managed-protocol.cpp windows/src/Json.cpp -o /tmp/protocol && /tmp/protocol
+      - name: Docker setup configuration
+        run: node --test deployment/tests/*.test.mjs
   windows:
     runs-on: windows-latest
     steps:

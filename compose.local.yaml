@@ -1,0 +1,39 @@
+name: artype
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: artype
+      POSTGRES_USER: artype
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deployment/setup.sh first}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U artype]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      options: {max-size: 10m, max-file: '3'}
+  api:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgresql://artype:${POSTGRES_PASSWORD}@db:5432/artype
+      PUBLIC_URL: http://127.0.0.1:${ARTYPE_LOCAL_PORT:-8080}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:?Set administrator email in .env}
+      PROVIDER_BASE_URL: ${PROVIDER_BASE_URL:-https://openrouter.ai/api/v1}
+      PROVIDER_KEYS: ${PROVIDER_KEYS:-\{\}}
+      TRUST_PROXY: '0'
+    ports: ['127.0.0.1:${ARTYPE_LOCAL_PORT:-8080}:8080']
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    logging:
+      options: {max-size: 10m, max-file: '3'}
+volumes:
+  postgres:
