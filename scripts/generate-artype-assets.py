@@ -33,12 +33,12 @@ combined=np.concatenate(mark+word); bx,by,bw,bh=cv2.boundingRect(combined)
 (OUT/'artype-logo-light.svg').write_text(svg(bw,bh,[('#9978ff',path(mark,bx,by)),('#ffffff',path(word,bx,by))]))
 (OUT/'artype-mark-mono.svg').write_text(svg(w,h,[('currentColor',path(mark,x,y))]))
 
-mask=np.zeros((h,w),np.uint8)
+mask=np.zeros((h*4,w*4),np.uint8)
 for c in mark:
     # Contour orientation distinguishes holes from outer boundaries.
-    shifted=c-np.array([x,y])
+    shifted=(c-np.array([x,y]))*4
     cv2.fillPoly(mask,[shifted],0 if cv2.contourArea(c,oriented=True)>0 else 255)
-mark_image=Image.new('RGBA',(w,h),'#7045ff'); mark_image.putalpha(Image.fromarray(mask))
+mark_image=Image.new('RGBA',(w*4,h*4),'#7045ff'); mark_image.putalpha(Image.fromarray(mask))
 mark_image.save(OUT/'artype-mark.png')
 app=Image.new('RGBA',(1024,1024))
 draw=ImageDraw.Draw(app); draw.rounded_rectangle((22,22,1002,1002),radius=215,fill='#f6f3ff')

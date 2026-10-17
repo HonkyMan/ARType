@@ -58,7 +58,7 @@ struct LanguageSettingsView: View {
                     .background(Color.red.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {
-                    SettingsNote(text: "TypeTide translates between \(selectedLanguage.shortName) and \(selectedTargetLanguage.shortName). Make sure your AI model supports both.")
+                    SettingsNote(text: "ARType translates between \(selectedLanguage.shortName) and \(selectedTargetLanguage.shortName). Make sure your AI model supports both.")
                 }
             } header: {
                 SettingsSectionHeader(symbol: "globe", color: .green,

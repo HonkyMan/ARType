@@ -7,12 +7,12 @@ import SwiftUI
 
 enum PreferencesSection: String, CaseIterable, Identifiable {
     case general = "Аккаунт"
-    case behavior = "Behavior"
+    case behavior = "Поведение"
     case backend = "Backend"
-    case language = "Language"
-    case shortcuts = "Shortcuts"
-    case skipApps = "Skip Apps"
-    case diagnostics = "Diagnostics"
+    case language = "Языки"
+    case shortcuts = "Горячие клавиши"
+    case skipApps = "Исключения"
+    case diagnostics = "Диагностика"
     case about = "About"
 
     var id: String { rawValue }

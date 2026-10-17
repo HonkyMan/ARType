@@ -17,7 +17,7 @@ struct MenuBarView: View {
         }
 
         Toggle(isOn: $isEnabled) {
-            Text(isEnabled ? "TypeTide is On" : "TypeTide is Off")
+            Text(isEnabled ? "ARType is On" : "ARType is Off")
         }
         .onChange(of: isEnabled) { _, _ in
             TriggerController.shared.applyEnabledState()
@@ -42,7 +42,7 @@ struct MenuBarView: View {
         Button(role: .destructive) {
             NSApp.terminate(nil)
         } label: {
-            Label("Quit TypeTide", systemImage: "power")
+            Label("Quit ARType", systemImage: "power")
         }
         .keyboardShortcut("q", modifiers: .command)
     }

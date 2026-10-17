@@ -107,6 +107,6 @@ private struct SelectionIconView: View {
         .animation(.easeOut(duration: reduceMotion ? 0 : 0.12), value: hovering)
         .help("Translate selection")
         .accessibilityLabel("Translate selected text")
-        .accessibilityHint("Opens the TypeTide translation popup")
+        .accessibilityHint("Opens the ARType translation popup")
     }
 }

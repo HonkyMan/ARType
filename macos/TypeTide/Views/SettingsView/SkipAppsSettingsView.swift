@@ -37,17 +37,17 @@ struct SkipAppsSettingsView: View {
                     .disabled(newAppName.trimmingCharacters(in: .whitespaces).isEmpty)
                     .buttonStyle(.borderedProminent)
                 }
-                SettingsNote(text: "Use the application name shown in the menu bar. TypeTide will ignore selections in matching apps.")
+                SettingsNote(text: "Use the application name shown in the menu bar. ARType will ignore selections in matching apps.")
             } header: {
                 SettingsSectionHeader(symbol: "plus.app.fill", color: .red,
-                                      title: "Add an app", subtitle: "Disable TypeTide in sensitive or incompatible apps")
+                                      title: "Add an app", subtitle: "Disable ARType in sensitive or incompatible apps")
             }
 
             Section {
                 if appSkipList.isEmpty {
                     SettingsEmptyState(
                         title: "Monitoring all apps",
-                        message: "No exclusions are configured. TypeTide is active wherever selection capture is supported.",
+                        message: "No exclusions are configured. ARType is active wherever selection capture is supported.",
                         symbol: "checkmark.shield.fill",
                         tint: TypeTideTheme.success
                     )

@@ -29,6 +29,7 @@ async function tenant(op, owner, overrides={}) {
 }
 before(async()=>{
   assert.ok(process.env.TEST_DATABASE_URL, 'Set TEST_DATABASE_URL to an isolated PostgreSQL database');
+  assert.match(new URL(process.env.TEST_DATABASE_URL).pathname, /_test$/, 'Test database must end in _test');
   await migrate(pool);
   server=createApp({pool,config,google:{authorizationURL:({state})=>`https://accounts.google.com/o/oauth2/v2/auth?state=${state}`,
     exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload)=>{

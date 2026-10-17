@@ -7,8 +7,7 @@ on:
         required: true
         default: http://127.0.0.1:8080
   push:
-    branches: [codex/artype-corporate]
-  pull_request:
+    branches: [main, codex/artype-corporate]
 permissions:
   contents: read
 jobs:
@@ -61,6 +60,7 @@ jobs:
           $version = (Get-Content VERSION -Raw).Trim()
           & $compiler "/DAppVersion=$version" windows/installer/TypeTide.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
+          Move-Item "windows/build/ARType-Setup-$version.exe" "windows/build/ARType-Setup-$version-UNSIGNED-VALIDATION.exe"
           Compress-Archive windows/build/ARType.exe,windows/build/TypeTide-LICENSE.txt windows/build/ARType-Windows-validation.zip
       - uses: actions/upload-artifact@v4
         with:

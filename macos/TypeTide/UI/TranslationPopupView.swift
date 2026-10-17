@@ -102,7 +102,7 @@ struct TranslationPopupView: View {
                 .scaledToFit()
                 .frame(width: 14, height: 14)
                 .foregroundStyle(TypeTideTheme.accent)
-            Text("TypeTide")
+            Text("ARType")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
