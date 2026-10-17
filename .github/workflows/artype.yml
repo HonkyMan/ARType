@@ -62,6 +62,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
           Move-Item "windows/build/ARType-Setup-$version.exe" "windows/build/ARType-Setup-$version-UNSIGNED-VALIDATION.exe"
           Compress-Archive windows/build/ARType.exe,windows/build/TypeTide-LICENSE.txt windows/build/ARType-Windows-validation.zip
+      - name: Install, exercise installed application and uninstall
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $installer = (Resolve-Path "windows/build/ARType-Setup-$version-UNSIGNED-VALIDATION.exe").Path
+          $target = Join-Path $env:RUNNER_TEMP 'ARType-installed'
+          if (Test-Path $target) { throw 'Installer validation requires a fresh directory' }
+          $installArgs = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=`"$target`""
+          $installed = Start-Process $installer -ArgumentList $installArgs -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "Installation failed: $($installed.ExitCode)" }
+          $exe = Join-Path $target 'ARType.exe'
+          $notice = Join-Path $target 'TypeTide-LICENSE.txt'
+          if ((Get-FileHash $exe).Hash -ne (Get-FileHash windows/build/ARType.exe).Hash) { throw 'Installed executable differs from tested build' }
+          if ((Get-FileHash $notice).Hash -ne (Get-FileHash LICENSE).Hash) { throw 'Full upstream license was not installed' }
+          $run = Start-Process $exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+          if ($run.ExitCode -ne 0) { throw "Installed application self-tests failed: $($run.ExitCode)" }
+          $uninstaller = Get-ChildItem $target -Filter 'unins*.exe' | Select-Object -First 1
+          if (!$uninstaller) { throw 'Uninstaller was not installed' }
+          $removed = Start-Process $uninstaller.FullName -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+          if ($removed.ExitCode -ne 0 -or (Test-Path $exe)) { throw 'Uninstall did not remove the application' }
       - uses: actions/upload-artifact@v4
         with:
           name: ARType-Windows-unsigned-validation
