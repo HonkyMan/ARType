@@ -1,3 +1,6 @@
+#include "ManagedAccount.h"
+#include "ManagedProtocol.h"
+#include "Credentials.h"
 #include "Translator.h"
 #include "BuiltInModel.h"
 #include "Http.h"
@@ -137,11 +140,12 @@ struct BackendConfig {
     std::string openAIBaseURL;
     std::string openAIKey;
     std::string openAIModel;
+    std::string tenantId;
 
     static BackendConfig snapshot() {
         const Settings& s = Settings::shared();
-        return {s.backend, s.ollamaHost, s.ollamaPort, s.ollamaModel,
-                s.openAIBaseURL, s.openAIKey, s.openAIModel};
+        return {TranslationBackend::OpenAI, s.ollamaHost, s.ollamaPort, s.ollamaModel,
+                account::ServiceURL(), credentials::LoadCloudApiKey(), "managed", s.tenantId};
     }
 };
 
@@ -245,74 +249,23 @@ StreamOutcome runOllama(const TranslationRequest& req, const BackendConfig& s, u
 StreamOutcome runOpenAI(const TranslationRequest& req, const BackendConfig& s, uint64_t id,
                         const DeltaFn& onDelta, const std::atomic<bool>& cancel) {
     StreamOutcome out;
-
-    std::string base = s.openAIBaseURL;
-    while (!base.empty() && base.back() == '/') base.pop_back();
-    if (base.empty()) {
-        out.error = L"Missing cloud API base URL";
-        return out;
-    }
-    if (s.openAIModel.empty()) {
-        out.error = L"Missing cloud model name";
-        return out;
-    }
-    const bool localEndpoint = base.rfind("http://127.0.0.1", 0) == 0 ||
-                               base.rfind("http://localhost", 0) == 0 ||
-                               base.rfind("http://[::1]", 0) == 0;
-    const bool secureEndpoint = base.rfind("https://", 0) == 0;
-    if (s.openAIKey.empty() && !localEndpoint) {
-        out.error = L"Missing cloud API key";
-        return out;
-    }
-    if (!s.openAIKey.empty() && !secureEndpoint && !localEndpoint) {
-        out.error = L"Refusing to send an API key over an insecure HTTP connection";
-        return out;
-    }
-
-    json::Array messages;
-    {
-        json::Object sys;
-        sys["role"] = "system";
-        sys["content"] = SystemPrompt(req.target, req.source, req.style);
-        messages.push_back(json::Value(std::move(sys)));
-        json::Object user;
-        user["role"] = "user";
-        user["content"] = util::Narrow(req.text);
-        messages.push_back(json::Value(std::move(user)));
-    }
-    json::Object body;
-    body["model"] = s.openAIModel;
-    body["stream"] = true;
-    body["messages"] = json::Value(std::move(messages));
-
-    std::wstring headers;
-    if (!s.openAIKey.empty())
-        headers += L"Authorization: Bearer " + util::Widen(s.openAIKey) + L"\r\n";
-    if (base.find("openrouter.ai") != std::string::npos) {
-        headers += L"HTTP-Referer: https://xnu.app/TypeTide/\r\n";
-        headers += L"X-OpenRouter-Title: TypeTide\r\n";
-    }
-
-    LineAssembler lines;
-    auto onLine = [&](const std::string& line) {
-            if (auto delta = ParseOpenAISSELine(line)) {
-                out.full += *delta;
-                onDelta(id, *delta);
-            }
+    if(!managed::OriginAllowed(s.openAIBaseURL)) {out.error=L"Адрес сервиса ARType не настроен.";return out;}
+    if(s.openAIKey.empty() || s.tenantId.empty()) {out.error=L"Войдите в ARType и выберите организацию в настройках.";return out;}
+    const auto body=managed::Request(util::Narrow(req.text),req.source?lang::Code(*req.source):"",
+        lang::Code(req.target),lang::StyleCode(req.style),s.tenantId,account::RequestId());
+    LineAssembler lines; bool complete=false;
+    auto onLine=[&](const std::string& line) {
+        if(line.find("data: [DONE]")==0)complete=true;
+        if(auto delta=ParseOpenAISSELine(line))out.full+=*delta;
     };
-    auto onChunk = [&](const char* data, size_t len) {
-        lines.feed(data, len, onLine);
-    };
-
-    http::Result r = http::PostStream(util::Widen(base) + L"/chat/completions",
-                                      json::Value(std::move(body)).dump(), headers, onChunk, cancel);
-    if (!r.ok) {
-        out.error = providerError(r);
-        return out;
-    }
+    auto result=http::PostStream(util::Widen(s.openAIBaseURL+"/api/translate"),body.dump(),
+        L"Authorization: Bearer "+util::Widen(s.openAIKey)+L"\r\n",
+        [&](const char* data,size_t size){lines.feed(data,size,onLine);},cancel);
+    if(!result.ok){out.error=providerError(result);return out;}
     lines.finish(onLine);
-    out.ok = true;
-    return out;
+    if(!complete || out.full.empty()) {out.error=L"Перевод прерван. Исходный текст сохранён.";return out;}
+    if(cancel.load())return out;
+    onDelta(id,out.full);out.ok=true;return out;
 }
 
 StreamOutcome runBuiltIn(const TranslationRequest& req, uint64_t id,
@@ -366,17 +319,7 @@ uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone) {
     // 配置快照在调用线程（主线程）拍好带进工作线程
     BackendConfig cfg = BackendConfig::snapshot();
 
-    // 缓存命中：同步回调全文
-    const char* provider = backendName(cfg.backend);
-    std::string key = cacheKey(req, provider);
-    if (auto cached = Cache::shared().get(key)) {
-        onDelta(id, *cached);
-        onDone(id, true, L"");
-        diagnostics::Record("translation", "cacheHit",
-                            provider,
-                            {}, {}, 0, 0, (int)req.text.size());
-        return id;
-    }
+    std::string key; // ARType always checks live access and policy on the server.
 
     auto cancel = std::make_shared<std::atomic<bool>>(false);
     {
@@ -411,7 +354,7 @@ uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone) {
         }
         const std::wstring cleaned = util::Trim(out.full);
         if (out.ok && !cleaned.empty()) {
-            Cache::shared().set(key, cleaned);
+
             onDone(id, true, L"");
             diagnostics::Record("translation", "success", backend, {}, {},
                                 firstMs, totalMs, (int)req.text.size());
@@ -482,7 +425,7 @@ void CheckHealthAsync(std::function<void(HealthCheckResult)> completion) {
     auto state = std::make_shared<State>();
     const std::string backend = backendName(Settings::shared().backend);
     Stream(
-        {L"TypeTide health check " + std::to_wstring(stamp), Language::English,
+        {L"ARType health check " + std::to_wstring(stamp), Language::English,
          Language::Chinese, RewriteStyle::Faithful},
         [state](uint64_t, const std::wstring& delta) {
             std::lock_guard lock(state->mutex);

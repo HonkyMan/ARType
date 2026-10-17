@@ -26,6 +26,11 @@ final class SelectionTranslationReplacementE2ETests: XCTestCase {
     }
 
     func testSelectedTextStreamsIntoPopupAndReplaceUpdatesEditor() async throws {
+        let oldNative = LanguageConfig.sourceLanguage
+        let oldForeign = LanguageConfig.targetLanguage
+        defer { LanguageConfig.sourceLanguage = oldNative; LanguageConfig.targetLanguage = oldForeign }
+        LanguageConfig.sourceLanguage = .chinese
+        LanguageConfig.targetLanguage = .english
         let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
         editor.string = "前缀 你好世界 后缀"
         let selected = (editor.string as NSString).range(of: "你好世界")

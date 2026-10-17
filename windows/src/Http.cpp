@@ -44,7 +44,7 @@ Result request(const std::wstring& url,
     }
     bool secure = uc.nScheme == INTERNET_SCHEME_HTTPS;
 
-    Handle session(WinHttpOpen(L"TypeTide/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    Handle session(WinHttpOpen(L"ARType/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (!session) { r.error = lastError("WinHttpOpen"); return r; }
 
@@ -58,6 +58,8 @@ Result request(const std::wstring& url,
                                   WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                   secure ? WINHTTP_FLAG_SECURE : 0));
     if (!req) { r.error = lastError("WinHttpOpenRequest"); return r; }
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
     std::wstring headers = L"Content-Type: application/json\r\n" + extraHeaders;
     if (!WinHttpSendRequest(req.h, headers.c_str(), (DWORD)headers.size(),
@@ -122,6 +124,9 @@ Result PostStream(const std::wstring& url, const std::string& body,
 
 Result Get(const std::wstring& url, const std::wstring& extraHeaders) {
     return request(url, L"GET", {}, extraHeaders, nullptr, nullptr);
+}
+Result Post(const std::wstring& url, const std::string& body, const std::wstring& extraHeaders) {
+    return request(url, L"POST", body, extraHeaders, nullptr, nullptr);
 }
 
 } // namespace http

@@ -4,7 +4,7 @@
 
 namespace ui {
 
-// Cross-platform TypeTide brand and semantic colors. Native Win32 controls
+// Cross-platform ARType brand and semantic colors. Native Win32 controls
 // retain system behavior while custom-drawn surfaces share these tokens.
 constexpr COLORREF Accent = RGB(0x7C, 0x5C, 0xFF);
 constexpr COLORREF AccentText = RGB(0xFF, 0xFF, 0xFF);

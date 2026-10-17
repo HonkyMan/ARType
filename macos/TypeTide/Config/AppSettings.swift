@@ -177,8 +177,8 @@ enum AppSettings {
     }
 
     static var backend: TranslationBackend {
-        get { TranslationBackend(rawValue: d.string(forKey: Keys.backend) ?? "") ?? .builtIn }
-        set { d.set(newValue.rawValue, forKey: Keys.backend) }
+        get { .openai }
+        set { d.set(TranslationBackend.openai.rawValue, forKey: Keys.backend) }
     }
 
     // MARK: OpenAI 兼容

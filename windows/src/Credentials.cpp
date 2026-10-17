@@ -3,7 +3,7 @@
 #include <wincred.h>
 
 namespace {
-constexpr wchar_t kTarget[] = L"TypeTide/OpenAICompatibleApiKey";
+constexpr wchar_t kTarget[] = L"ARType/SessionToken";
 }
 
 namespace credentials {
@@ -32,7 +32,7 @@ bool SaveCloudApiKey(const std::string& key) {
     credential.CredentialBlobSize = static_cast<DWORD>(key.size());
     credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char*>(key.data()));
     credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    credential.UserName = const_cast<LPWSTR>(L"TypeTide");
+    credential.UserName = const_cast<LPWSTR>(L"ARType");
     return CredWriteW(&credential, 0) != FALSE;
 }
 

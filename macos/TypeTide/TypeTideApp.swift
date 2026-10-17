@@ -36,7 +36,7 @@ enum SettingsOpener {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "TypeTide Settings"
+            window.title = "ARType"
             window.contentViewController = host
             window.isReleasedWhenClosed = false
             window.setFrameAutosaveName("TypeTideSettingsWindow")
@@ -73,11 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 #endif
 
         // 若配置的 Ollama 模型未安装，自动挑一个已装模型（避免开箱即败）
-        Task { @MainActor in
-            if let model = await OllamaModelResolver.ensureValidDefault(), AppSettings.backend == .ollama {
-                await OllamaModelResolver.preload(model)
-            }
-        }
+        Task { @MainActor in await ManagedAccount.shared.refresh() }
 
         // 首次启动：打开设置窗口，让用户立刻看到界面并完成配置
         if !UserDefaults.standard.bool(forKey: AppSettings.Keys.hasCompletedFirstLaunch) {
@@ -89,11 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // 自动检查更新
-        Task { @MainActor in
-            if UpdateChecker.shared.shouldAutoCheck() {
-                UpdateChecker.shared.checkForUpdates(silent: true)
-            }
-        }
     }
 
     /// App 已在运行时被再次打开（Finder/启动台双击）：没有可见窗口就打开设置，
@@ -113,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             image.isTemplate = true
             button.image = image
             button.imageScaling = .scaleProportionallyDown
-            button.toolTip = "TypeTide"
+            button.toolTip = "ARType"
         }
         statusMenu.autoenablesItems = false
         statusMenu.delegate = self
@@ -133,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusMenu.addItem(.separator())
         }
 
-        let enabled = NSMenuItem(title: AppSettings.isEnabled ? "TypeTide is On" : "TypeTide is Off",
+        let enabled = NSMenuItem(title: AppSettings.isEnabled ? "ARType включён" : "ARType выключен",
                                  action: #selector(toggleEnabled), keyEquivalent: "")
         enabled.target = self
         enabled.state = AppSettings.isEnabled ? .on : .off
@@ -156,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         statusMenu.addItem(settings)
 
-        let quit = NSMenuItem(title: "Quit TypeTide", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Выйти из ARType", action: #selector(quitApp), keyEquivalent: "q")
         quit.keyEquivalentModifierMask = [.command]
         quit.target = self
         quit.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)

@@ -49,7 +49,7 @@ final class BuiltInTranslationTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultIsBuiltInAndExplicitOllamaChoicePersists() {
+    func testCorporateBackendCannotBeOverriddenByStoredLocalChoice() {
         let key = AppSettings.Keys.backend
         let old = UserDefaults.standard.object(forKey: key)
         defer {
@@ -57,9 +57,11 @@ final class BuiltInTranslationTests: XCTestCase {
             else { UserDefaults.standard.removeObject(forKey: key) }
         }
         UserDefaults.standard.removeObject(forKey: key)
-        XCTAssertEqual(AppSettings.backend, .builtIn)
+        XCTAssertEqual(AppSettings.backend, .openai)
         AppSettings.backend = .ollama
-        XCTAssertEqual(AppSettings.backend, .ollama)
+        XCTAssertEqual(AppSettings.backend, .openai)
+        UserDefaults.standard.set("builtIn", forKey: key)
+        XCTAssertEqual(AppSettings.backend, .openai)
         AppSettings.backend = .openai
         XCTAssertEqual(AppSettings.backend, .openai)
     }

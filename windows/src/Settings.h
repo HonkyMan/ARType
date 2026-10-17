@@ -1,6 +1,6 @@
 //
 //  Settings.h — 全局设置（对应 macOS 的 AppSettings），
-//  JSON 持久化到 %APPDATA%\TypeTide\settings.json。
+//  JSON 持久化到 %APPDATA%\ARType\settings.json。
 //
 #pragma once
 #include <windows.h>
@@ -38,7 +38,8 @@ struct Hotkey {
 
 struct Settings {
     bool enabled = true;
-    TranslationBackend backend = TranslationBackend::BuiltIn;
+    TranslationBackend backend = TranslationBackend::OpenAI;
+    std::string tenantId;
 
     // Ollama
     std::string ollamaHost = "http://127.0.0.1";
@@ -51,7 +52,7 @@ struct Settings {
     std::string openAIModel = "gpt-5-mini";
 
     // 语言（native = 母语，foreign = 外语）
-    Language nativeLanguage = Language::Chinese;
+    Language nativeLanguage = Language::Russian;
     Language foreignLanguage = Language::English;
     TranslationDirection readDirection = TranslationDirection::Auto;
     TranslationDirection rewriteDirection = TranslationDirection::Auto;

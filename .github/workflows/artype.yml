@@ -1,0 +1,77 @@
+name: ARType validation
+on:
+  workflow_dispatch:
+    inputs:
+      service_url:
+        description: ARType HTTPS service origin (loopback only for validation)
+        required: true
+        default: http://127.0.0.1:8080
+  push:
+    branches: [codex/artype-corporate]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: artype
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: artype_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U artype" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: server
+        env:
+          TEST_DATABASE_URL: postgresql://artype:test-only@127.0.0.1:5432/artype_test
+      - run: g++ -std=c++20 -I windows/src windows/tests/managed-protocol.cpp windows/src/Json.cpp -o /tmp/protocol && /tmp/protocol
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        shell: pwsh
+        env:
+          SERVICE_URL: ${{ inputs.service_url || 'http://127.0.0.1:8080' }}
+        run: cmake -S windows -B windows/build -A x64 "-DARTYPE_SERVICE_URL=$env:SERVICE_URL"
+      - run: cmake --build windows/build --config Release
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $env:TYPETIDE_DATA_DIR = "$env:RUNNER_TEMP\artype-ci"
+          $p = Start-Process windows\build\Release\ARType.exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "Self-test failed: $($p.ExitCode)" }
+      - name: Installer (unsigned validation)
+        shell: pwsh
+        run: |
+          Copy-Item windows/build/Release/ARType.exe windows/build/ARType.exe
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $compiler)) { throw 'Inno Setup is missing on runner' }
+          $version = (Get-Content VERSION -Raw).Trim()
+          & $compiler "/DAppVersion=$version" windows/installer/TypeTide.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
+          Compress-Archive windows/build/ARType.exe windows/build/ARType-Windows-validation.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ARType-Windows-unsigned-validation
+          path: |
+            windows/build/ARType-Setup-*.exe
+            windows/build/ARType-Windows-validation.zip
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Metal toolchain
+        run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
+      - name: Build and tests
+        run: xcodebuild -project macos/TypeTide.xcodeproj -scheme TypeTide -configuration Debug -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/ARType" CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= test

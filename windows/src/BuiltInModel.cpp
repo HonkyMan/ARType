@@ -42,7 +42,7 @@ std::wstring dataDirectory() {
     wchar_t path[32768]{};
     n = GetEnvironmentVariableW(L"LOCALAPPDATA", path, 32768);
     if (n == 0 || n >= 32768) return {};
-    return std::wstring(path) + L"\\TypeTide\\Models";
+    return std::wstring(path) + L"\\ARType\\Models";
 }
 
 std::wstring helperPath() {
@@ -136,7 +136,7 @@ bool ensureServer(const std::atomic<bool>& cancel, std::wstring* error) {
         if (!Installed()) { *error = L"Download the built-in model in Settings → Translation."; return false; }
         const std::wstring exe = helperPath();
         if (exe.empty() || GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            *error = L"Bundled inference runtime is missing. Reinstall TypeTide.";
+            *error = L"Bundled inference runtime is missing. Reinstall ARType.";
             return false;
         }
         g_port = freeLoopbackPort();
@@ -231,7 +231,7 @@ bool Download(const std::atomic<bool>& cancel,
         parts.lpszHostName = host; parts.dwHostNameLength = 256;
         parts.lpszUrlPath = urlPath; parts.dwUrlPathLength = 2048;
         if (!WinHttpCrackUrl(kModelURL, 0, 0, &parts)) { *error = L"Invalid model URL."; break; }
-        InternetHandle session(WinHttpOpen(L"TypeTide/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        InternetHandle session(WinHttpOpen(L"ARType/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
         if (!session) { *error = L"Cannot start model download."; break; }
         WinHttpSetTimeouts(session.value, 10000, 10000, 60000, 60000);

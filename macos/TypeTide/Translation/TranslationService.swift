@@ -21,11 +21,7 @@ final class TranslationService {
 #if DEBUG
         if let providerOverride { return providerOverride }
 #endif
-        switch AppSettings.backend {
-        case .builtIn: return LocalTranslationProvider()
-        case .ollama: return OllamaProvider()
-        case .openai: return OpenAIProvider()
-        }
+        return ManagedTranslationProvider()
     }
 
     /// 流式翻译。命中缓存时一次性 yield 全文；否则边流边累积，结束后写缓存。
@@ -36,7 +32,7 @@ final class TranslationService {
 
         return AsyncThrowingStream { continuation in
             let start = ContinuousClock.now
-            if let cached = TranslationCache.shared.value(for: cacheKey) {
+            if provider.id != "artype", let cached = TranslationCache.shared.value(for: cacheKey) {
                 continuation.yield(cached)
                 continuation.finish()
                 Self.recordTranslation(outcome: "cacheHit", provider: provider.id, start: start,
@@ -54,7 +50,7 @@ final class TranslationService {
                     }
                     let cleaned = full.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !cleaned.isEmpty else { throw TranslationError.empty }
-                    TranslationCache.shared.set(cleaned, for: cacheKey)
+                    if provider.id != "artype" { TranslationCache.shared.set(cleaned, for: cacheKey) }
                     continuation.finish()
                     Self.recordTranslation(outcome: "success", provider: provider.id, start: start,
                                            firstToken: firstToken, characterCount: characterCount)

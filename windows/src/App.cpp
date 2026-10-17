@@ -47,7 +47,7 @@ bool App::init(HINSTANCE inst) {
     RegisterClassW(&wc);
 
     // 隐藏主窗口（顶层不可见；托盘与热键的宿主）
-    hwnd_ = CreateWindowExW(0, kAppWindowClass, L"TypeTide", 0, 0, 0, 0, 0,
+    hwnd_ = CreateWindowExW(0, kAppWindowClass, L"ARType", 0, 0, 0, 0, 0,
                             nullptr, nullptr, inst, nullptr);
     if (!hwnd_) return false;
 
@@ -72,11 +72,11 @@ bool App::init(HINSTANCE inst) {
         openSettings();
     }
 
-    updatechecker::CheckIfDue(hwnd_, WM_APP_UPDATE);
+
 
     // 配置的 Ollama 模型未安装时自动挑一个已装的（避免开箱即败）。
     // 网络在工作线程，Settings 的读写回到主线程（WM_APP_MODELS）。
-    ollamamodels::FetchInstalledAsync(hwnd_, WM_APP_MODELS);
+
 
     return true;
 }

@@ -87,7 +87,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     }
 
     // 单实例：已在运行则让它打开设置窗口
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\TypeTideSingleInstance");
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\ARTypeSingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND existing = FindWindowW(kAppWindowClass, nullptr))
             PostMessageW(existing, WM_APP_OPEN_SETTINGS, 0, 0);

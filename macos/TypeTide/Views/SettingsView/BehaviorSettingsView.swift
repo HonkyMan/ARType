@@ -44,9 +44,6 @@ struct BehaviorSettingsView: View {
                         Text(s.displayName).tag(s.rawValue)
                     }
                 }
-                if backendRaw == TranslationBackend.builtIn.rawValue {
-                    SettingsNote(text: "The built-in model supports Faithful translation only. Select Faithful here, or choose Ollama/API in Backend for other styles.", tint: .orange)
-                }
             } header: {
                 SettingsSectionHeader(symbol: "pencil.and.outline", color: .purple,
                                       title: "Rewrite & replace", subtitle: "Control preview and writing style")

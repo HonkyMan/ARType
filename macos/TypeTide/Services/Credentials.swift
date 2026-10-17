@@ -2,8 +2,8 @@ import Foundation
 import Security
 
 enum Credentials {
-    private static let service = "com.xnu.typetide"
-    private static let cloudAPIKeyAccount = "cloud-api-key"
+    private static let service = "com.artype.desktop"
+    private static let cloudAPIKeyAccount = "session-token"
 
     static func cloudAPIKey() -> String {
         let query: [String: Any] = [

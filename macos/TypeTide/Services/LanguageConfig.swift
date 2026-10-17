@@ -123,7 +123,7 @@ struct LanguageConfig {
                let language = Language(rawValue: savedLang) {
                 return language
             }
-            return .chinese // 默认为中文
+            return .russian
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "sourceLanguage")

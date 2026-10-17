@@ -48,3 +48,11 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 # Secrets
 .env
+.env.*
+!.env.example
+.local/
+node_modules/
+coverage/
+test-results/
+playwright-report/
+*.log

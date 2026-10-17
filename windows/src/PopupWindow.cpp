@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr wchar_t kClassName[] = L"TypeTidePopup";
+constexpr wchar_t kClassName[] = L"ARTypePopup";
 constexpr UINT_PTR kCopiedTimer = 1;
 constexpr UINT_PTR kTideTimer = 2;
 
@@ -74,7 +74,7 @@ void PopupWindow::show(const std::wstring& original, Language target, RECT ancho
     (void)registered;
 
     hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                            kClassName, L"TypeTide", WS_POPUP,
+                            kClassName, L"ARType", WS_POPUP,
                             0, 0, 10, 10, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     util::Log("popup show hwnd=%p", (void*)hwnd_);
     if (!hwnd_) return;
@@ -294,7 +294,7 @@ void PopupWindow::paint(HDC dc) {
     brand::DrawMark(dc, rcMark, ui::Accent);
     SetTextColor(dc, th.secondary);
     RECT rcBrand{rcMark.right + px(4), 0, client.right, headerH};
-    DrawTextW(dc, L"TypeTide", -1, &rcBrand, DT_SINGLELINE | DT_VCENTER);
+    DrawTextW(dc, L"ARType", -1, &rcBrand, DT_SINGLELINE | DT_VCENTER);
 
     // 目标语言 chip
     {

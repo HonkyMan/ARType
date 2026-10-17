@@ -4,7 +4,7 @@
 
 namespace brand {
 
-/// 单色 TypeTide 标记：点阵汇聚成潮头。适用于托盘外的小尺寸 GDI 界面。
+/// 单色 ARType 标记：点阵汇聚成潮头。适用于托盘外的小尺寸 GDI 界面。
 inline void DrawMark(HDC dc, RECT bounds, COLORREF color) {
     const int width = std::max<LONG>(1, bounds.right - bounds.left);
     const int height = std::max<LONG>(1, bounds.bottom - bounds.top);
@@ -14,33 +14,14 @@ inline void DrawMark(HDC dc, RECT bounds, COLORREF color) {
     HBRUSH brush = CreateSolidBrush(color);
     HGDIOBJ oldBrush = SelectObject(dc, brush);
     HGDIOBJ oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
-    auto curve = [&](int x1, int y1, int x2, int y2, int x3, int y3) {
-        POINT points[] = {{x(x1), y(y1)}, {x(x2), y(y2)}, {x(x3), y(y3)}};
-        PolyBezierTo(dc, points, 3);
-    };
-
-    BeginPath(dc);
-    MoveToEx(dc, x(18), y(45), nullptr);
-    curve(32, 45, 31, 14, 47, 15);
-    curve(62, 15, 61, 34, 51, 36);
-    curve(57, 28, 49, 24, 44, 28);
-    curve(39, 32, 43, 45, 58, 48);
-    curve(40, 52, 28, 51, 18, 45);
-    CloseFigure(dc);
-    EndPath(dc);
-    FillPath(dc);
-
-    constexpr int dots[][3] = {
-        {8, 29, 2}, {13, 25, 2}, {18, 23, 2},
-        {8, 36, 2}, {14, 34, 3}, {21, 31, 2},
-        {11, 43, 2}, {17, 42, 2}, {24, 38, 3},
-    };
-    for (const auto& dot : dots) {
-        const int radiusX = std::max(1, MulDiv(dot[2], width, 64));
-        const int radiusY = std::max(1, MulDiv(dot[2], height, 64));
-        Ellipse(dc, x(dot[0]) - radiusX, y(dot[1]) - radiusY,
-                x(dot[0]) + radiusX + 1, y(dot[1]) + radiusY + 1);
-    }
+    // Shift A: shared A-to-arrow silhouette, simplified for small native surfaces.
+    POINT outline[]={{x(4),y(55)},{x(26),y(9)},{x(38),y(9)},
+        {x(49),y(33)},{x(39),y(33)},{x(32),y(19)},{x(15),y(55)}};
+    Polygon(dc,outline,7);
+    POINT arrow[]={{x(21),y(34)},{x(50),y(34)},{x(50),y(27)},
+        {x(63),y(39)},{x(55),y(47)},{x(60),y(55)},{x(47),y(55)},
+        {x(41),y(43)},{x(17),y(43)}};
+    Polygon(dc,arrow,9);
 
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);

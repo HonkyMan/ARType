@@ -67,6 +67,7 @@ void Settings::load() {
     };
 
     enabled = boolean("enabled", enabled);
+    tenantId = str("tenantId", "");
     const std::string backendCode = str("backend", "builtin");
     backend = backendCode == "builtin" ? TranslationBackend::BuiltIn
             : backendCode == "openai" ? TranslationBackend::OpenAI : TranslationBackend::Ollama;
@@ -80,20 +81,7 @@ void Settings::load() {
 
     openAIBaseURL = str("openAIBaseURL", openAIBaseURL);
     if (openAIBaseURL.size() > 2048) openAIBaseURL = "https://api.openai.com/v1";
-    const std::string legacyKey = str("openAIKey", "");
-    wchar_t testDir[2]{};
-    const bool isolatedTest = GetEnvironmentVariableW(L"TYPETIDE_DATA_DIR", testDir, 2) != 0;
-    bool migratedLegacyKey = false;
-    if (isolatedTest) {
-        openAIKey = legacyKey;
-    } else {
-        openAIKey = credentials::LoadCloudApiKey();
-        if (openAIKey.empty() && !legacyKey.empty()) {
-            openAIKey = legacyKey;
-            credentials::SaveCloudApiKey(openAIKey); // migrate old plaintext settings
-            migratedLegacyKey = true;
-        }
-    }
+    openAIKey.clear(); // Session tokens are read only from Credential Manager.
     openAIModel = str("openAIModel", openAIModel);
     if (openAIModel.size() > 256) openAIModel = "gpt-5-mini";
 
@@ -151,12 +139,13 @@ void Settings::load() {
 
     hasCompletedFirstLaunch = boolean("hasCompletedFirstLaunch", false);
     lastUpdateCheck = (long long)root["lastUpdateCheck"].asNumber(0);
-    if (migratedLegacyKey) save(); // rewrite JSON without the plaintext key
+    backend = TranslationBackend::OpenAI;
 }
 
 bool Settings::save() const {
     json::Object root;
     root["enabled"] = enabled;
+    root["tenantId"] = tenantId;
     root["backend"] = backend == TranslationBackend::BuiltIn ? "builtin"
                     : backend == TranslationBackend::OpenAI ? "openai" : "ollama";
 
@@ -165,13 +154,6 @@ bool Settings::save() const {
     root["ollamaModel"] = ollamaModel;
 
     root["openAIBaseURL"] = openAIBaseURL;
-    wchar_t testDir[2]{};
-    const bool isolatedTest = GetEnvironmentVariableW(L"TYPETIDE_DATA_DIR", testDir, 2) != 0;
-    if (isolatedTest) root["openAIKey"] = openAIKey;
-    else if (!credentials::SaveCloudApiKey(openAIKey)) {
-        util::Log("settings: credential save failed (%lu)", GetLastError());
-        return false;
-    }
     root["openAIModel"] = openAIModel;
 
     root["nativeLanguage"] = lang::Code(nativeLanguage);

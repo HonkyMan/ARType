@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct LanguageSettingsView: View {
+    @ObservedObject private var account = ManagedAccount.shared
     @State private var selectedLanguage = LanguageConfig.sourceLanguage
     @State private var selectedTargetLanguage = LanguageConfig.targetLanguage
     @State private var readDirection = AppSettings.readDirection
@@ -18,7 +19,7 @@ struct LanguageSettingsView: View {
         Form {
             Section {
                 Picker("Native language", selection: $selectedLanguage) {
-                    ForEach(Language.allCases) { language in
+                    ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
                     }
@@ -29,7 +30,7 @@ struct LanguageSettingsView: View {
                 }
 
                 Picker("Foreign language", selection: $selectedTargetLanguage) {
-                    ForEach(Language.allCases) { language in
+                    ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
                     }

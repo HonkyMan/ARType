@@ -6,7 +6,7 @@
 import SwiftUI
 
 enum PreferencesSection: String, CaseIterable, Identifiable {
-    case general = "General"
+    case general = "Аккаунт"
     case behavior = "Behavior"
     case backend = "Backend"
     case language = "Language"

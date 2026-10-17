@@ -26,5 +26,6 @@ Result PostStream(const std::wstring& url,
 
 /// 一次性 GET（用于版本检查等小请求）
 Result Get(const std::wstring& url, const std::wstring& extraHeaders = L"");
+Result Post(const std::wstring& url, const std::string& body, const std::wstring& extraHeaders = L"");
 
 } // namespace http

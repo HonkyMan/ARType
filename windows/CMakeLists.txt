@@ -13,6 +13,7 @@ add_executable(TypeTide WIN32
     src/Language.cpp
     src/Settings.cpp
     src/Credentials.cpp
+    src/ManagedAccount.cpp
     src/Clipboard.cpp
     src/Keyboard.cpp
     src/Http.cpp
@@ -34,6 +35,10 @@ add_executable(TypeTide WIN32
     src/TypeTide.rc
     src/TypeTide.manifest
 )
+
+set(ARTYPE_SERVICE_URL "http://127.0.0.1:8080" CACHE STRING "ARType server origin")
+target_compile_definitions(TypeTide PRIVATE ARTYPE_SERVICE_URL="${ARTYPE_SERVICE_URL}")
+set_target_properties(TypeTide PROPERTIES OUTPUT_NAME ARType)
 
 target_compile_definitions(TypeTide PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
