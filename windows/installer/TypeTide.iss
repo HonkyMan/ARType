@@ -40,6 +40,7 @@ Name: "autostart"; Description: "Start ARType when I sign in"; GroupDescription:
 
 [Files]
 Source: "..\build\ARType.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "TypeTide-LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\ARType"; Filename: "{app}\ARType.exe"

@@ -55,12 +55,13 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item windows/build/Release/ARType.exe windows/build/ARType.exe
+          Copy-Item LICENSE windows/build/TypeTide-LICENSE.txt
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (!(Test-Path $compiler)) { throw 'Inno Setup is missing on runner' }
           $version = (Get-Content VERSION -Raw).Trim()
           & $compiler "/DAppVersion=$version" windows/installer/TypeTide.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
-          Compress-Archive windows/build/ARType.exe windows/build/ARType-Windows-validation.zip
+          Compress-Archive windows/build/ARType.exe,windows/build/TypeTide-LICENSE.txt windows/build/ARType-Windows-validation.zip
       - uses: actions/upload-artifact@v4
         with:
           name: ARType-Windows-unsigned-validation

@@ -18,7 +18,7 @@ export function makeTranslator(config) {
     finally {await reader.cancel()}
     const data=JSON.parse(Buffer.concat(parts).toString('utf8'));
     const choice=data.choices?.[0], text=choice?.message?.content;
-    if(typeof text!=='string' || !text.trim() || choice.finish_reason==='length' || choice.finish_reason==='content_filter')throw new Error('Incomplete translation');
+    if(typeof text!=='string' || !text.trim() || data.error || choice.error || choice.finish_reason!=='stop')throw new Error('Incomplete translation');
     return {text:text.trim(),input_tokens:Math.max(0,Math.trunc(data.usage?.prompt_tokens||0)),output_tokens:Math.max(0,Math.trunc(data.usage?.completion_tokens||0))};
   };
 }

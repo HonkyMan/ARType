@@ -10,6 +10,7 @@ const origin = 'http://127.0.0.1:43189';
 const config = {origin, adminEmails:['operator@example.com'], googleClientId:'test-client', googleClientSecret:'test-secret',
   providerKeys:{main:'server-only-key'}, providerBaseURL:'https://example.com/v1', secure:false};
 let server, url, upstreamCalls, upstreamFail, googleClaims;
+const claimsByCode=new Map();
 const hash = s => createHash('sha256').update(s).digest('hex');
 async function actor(email) {
   const id=randomUUID(), token=randomUUID(), csrf=randomUUID();
@@ -30,7 +31,7 @@ before(async()=>{
   assert.ok(process.env.TEST_DATABASE_URL, 'Set TEST_DATABASE_URL to an isolated PostgreSQL database');
   await migrate(pool);
   server=createApp({pool,config,google:{authorizationURL:({state})=>`https://accounts.google.com/o/oauth2/v2/auth?state=${state}`,
-    exchange:async()=>googleClaims}, translate:async(payload)=>{
+    exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload)=>{
       upstreamCalls.push(payload); if(upstreamFail)throw new Error('provider internal secret');
       await new Promise(r=>setTimeout(r,30)); return {text:'Hello world',input_tokens:10,output_tokens:3};
     }}).listen(0,'127.0.0.1');
@@ -62,6 +63,30 @@ test('concurrent invitations cannot exceed seats and last owner cannot be remove
   const own=members.find(m=>m.email==='owner@example.com');
   assert.equal((await call(`/api/tenants/${t.id}/members/${own.id}`,{actor:owner,method:'PATCH',body:{status:'disabled'}})).status,409);
   assert.equal((await call(`/api/tenants/${t.id}`,{actor:owner,method:'PATCH',body:{seats:99}})).status,403);
+});
+
+test('expired owner invitation cannot replace the last active owner',async()=>{
+  const op=await actor('operator@example.com'), owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com');await call('/api/me',{actor:owner});
+  await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'other@example.com',role:'owner'}});
+  await pool.query("UPDATE memberships SET expires_at=now()-interval '1 second' WHERE email='other@example.com'");
+  const id=(await pool.query("SELECT id FROM memberships WHERE email='owner@example.com'")).rows[0].id;
+  assert.equal((await call(`/api/tenants/${t.id}/members/${id}`,{actor:owner,method:'PATCH',body:{role:'member'}})).status,409);
+});
+
+test('login activation waits for tenant lock then rechecks invitation expiry',async()=>{
+  const op=await actor('operator@example.com'), a=await actor('a@example.com');
+  const t=await tenant(op,'owner@example.com',{seats:2});
+  await call(`/api/tenants/${t.id}/members`,{actor:op,method:'POST',body:{email:'a@example.com',role:'member'}});
+  const lock=await pool.connect();await lock.query('BEGIN');await lock.query('SELECT id FROM tenants WHERE id=$1 FOR UPDATE',[t.id]);
+  let completed=false;const request=call('/api/me',{actor:a}).then(r=>{completed=true;return r});
+  await new Promise(r=>setTimeout(r,80));
+  const waited=!completed;
+  await lock.query("UPDATE memberships SET expires_at=clock_timestamp()-interval '1 second' WHERE tenant_id=$1 AND email='a@example.com'",[t.id]);
+  await lock.query('COMMIT');lock.release();
+  const result=await request;assert.ok(waited,'activation must participate in organization locking');
+  assert.equal(result.data.tenants.length,0);
+  assert.equal((await pool.query("SELECT status FROM memberships WHERE email='a@example.com'")).rows[0].status,'invited');
 });
 test('proxy enforces quota atomically and constructs provider prompt on server',async()=>{
   const op=await actor('operator@example.com'), a=await actor('a@example.com');
@@ -112,6 +137,22 @@ test('Google state is bound to browser, one-use and nonce checked',async()=>{
   assert.equal((await call(`/auth/google/callback?state=${ns}&code=x`,{headers:{Cookie:nc}})).status,302);
   assert.equal((await call(`/auth/google/callback?state=${ns}&code=x`,{headers:{Cookie:nc}})).status,400);
 });
+
+test('simultaneous first Google logins create one identity and two valid sessions',async()=>{
+  const starts=await Promise.all([call('/auth/google'),call('/auth/google')]);
+  const states=starts.map(r=>new URL(r.headers.get('location')).searchParams.get('state'));
+  for(let i=0;i<2;i++){
+    const row=(await pool.query('SELECT nonce FROM oauth_states WHERE state_hash=$1',[hash(states[i])])).rows[0];
+    claimsByCode.set('parallel'+i,{sub:'same-google-user',email:'new@example.com',email_verified:true,name:'New',nonce:row.nonce});
+  }
+  const barrier=await pool.connect();await barrier.query('BEGIN');await barrier.query('LOCK TABLE users IN SHARE MODE');
+  const requests=starts.map((r,i)=>call(`/auth/google/callback?state=${states[i]}&code=parallel${i}`,{headers:{Cookie:r.headers.get('set-cookie').split(';')[0]}}));
+  await new Promise(r=>setTimeout(r,80));await barrier.query('COMMIT');barrier.release();
+  const results=await Promise.all(requests);assert.deepEqual(results.map(r=>r.status),[302,302]);
+  assert.equal((await pool.query("SELECT count(*)::int n FROM users WHERE sub='same-google-user'")).rows[0].n,1);
+  for(const r of results)assert.equal((await call('/api/me',{headers:{Cookie:r.headers.getSetCookie().find(c=>c.startsWith('artype_session=')).split(';')[0]}})).status,200);
+  claimsByCode.clear();
+});
 test('device grant requires approved browser session and verifier, redeemed once; logout revokes token',async()=>{
   const op=await actor('operator@example.com'); const verifier='a'.repeat(64);
   const d=(await call('/api/device/start',{method:'POST',body:{challenge:hash(verifier)}})).data;
@@ -126,4 +167,13 @@ test('device grant requires approved browser session and verifier, redeemed once
   assert.equal((await call('/api/me',{headers:h})).status,200);
   assert.equal((await call('/api/logout',{method:'POST',headers:h})).status,200);
   assert.equal((await call('/api/me',{headers:h})).status,401);
+});
+
+test('valid device polling is isolated for employees behind the same office IP',async()=>{
+  const verifier='c'.repeat(64),devices=[];
+  for(let i=0;i<12;i++)devices.push((await call('/api/device/start',{method:'POST',body:{challenge:hash(verifier)}})).data);
+  for(let i=0;i<20;i++)for(const d of devices){
+    const r=await call('/api/device/poll',{method:'POST',body:{id:d.id,poll_token:d.poll_token,verifier}});
+    assert.equal(r.status,202,'one device must not consume another device polling allowance');
+  }
 });

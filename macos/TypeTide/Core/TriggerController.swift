@@ -21,6 +21,9 @@ final class TriggerController {
 
     private var streamTask: Task<Void, Never>?
     private var rewriteTask: Task<Void, Never>?
+    private var readCaptureTask: Task<Void, Never>?
+    private var replacementTask: Task<Void, Never>?
+    private var contextGeneration: UInt64 = 0
     private var rewriteRequestID: UInt64 = 0
 
     private(set) var readShortcutStatus: ShortcutRegistrationStatus = .inactive
@@ -42,6 +45,17 @@ final class TriggerController {
 
     func start() {
         applyEnabledState()
+    }
+
+    func cancelTranslations() {
+        contextGeneration += 1
+        readCaptureTask?.cancel()
+        replacementTask?.cancel()
+        streamTask?.cancel()
+        rewriteTask?.cancel()
+        rewriteRequestID += 1
+        PopupController.shared.close()
+        SelectionIconWindow.shared.hide()
     }
 
     /// 根据开关 + 快捷键 + 划词设置重新装配触发。
@@ -117,8 +131,12 @@ final class TriggerController {
             return
         }
         guard !AppSettings.shouldSkipFrontmostApplication() else { return }
-        Task { @MainActor in
-            guard let cap = await SelectionCapture.readSelection() else {
+        readCaptureTask?.cancel()
+        let context=contextGeneration
+        readCaptureTask = Task { @MainActor in
+            let captured=await SelectionCapture.readSelection()
+            guard context==contextGeneration, !Task.isCancelled else {return}
+            guard let cap = captured else {
                 presentCaptureFailure("Couldn’t read selected text. The app may not expose its selection and the clipboard fallback received no text.")
                 return
             }
@@ -148,9 +166,11 @@ final class TriggerController {
         let model = PopupController.shared.show(original: text, target: dir.to, anchor: anchor,
                                                 onReplace: nil, dismissOnInteraction: dismissOnInteraction)
         model.onDismiss = { [weak self] in self?.streamTask?.cancel() }
-        model.onReplace = { [weak model] in
-            guard let model, !model.translation.isEmpty else { return }
-            Task { @MainActor in
+        let context=contextGeneration
+        model.onReplace = { [weak self, weak model] in
+            guard let self, self.contextGeneration==context, let model, !model.translation.isEmpty else { return }
+            self.replacementTask = Task { @MainActor in
+                guard self.contextGeneration==context, !Task.isCancelled else {return}
                 PopupController.shared.close()
                 await TextReplacer.replace(with: model.translation, selectAll: false)
             }

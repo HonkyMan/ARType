@@ -78,12 +78,13 @@ final class ManagedAccount: ObservableObject {
     @Published var busy=false
     @Published var selected: String=UserDefaults.standard.string(forKey:"artype.organization") ?? "" {
         didSet {
+            TriggerController.shared.cancelTranslations()
             UserDefaults.standard.set(selected,forKey:"artype.organization")
             alignLanguages()
         }
     }
     private var loginTask: Task<Void,Never>?
-    private var generation=UUID()
+    fileprivate var generation=UUID()
     var token: String { Credentials.cloudAPIKey() }
     var signedIn: Bool { !token.isEmpty }
     var allowedLanguages:[Language] {
@@ -104,6 +105,7 @@ final class ManagedAccount: ObservableObject {
             let p=try JSONDecoder().decode(Profile.self,from:data)
             guard generation==current else {return}
             email=p.user.email;organizations=p.tenants;message=""
+            UserDefaults.standard.set(true,forKey:AppSettings.Keys.hasCompletedFirstLaunch)
             if !organizations.contains(where:{$0.id==selected}) {selected=organizations.first?.id ?? ""}
             alignLanguages()
         }catch { if generation==current {message=error.localizedDescription} }
@@ -142,6 +144,7 @@ final class ManagedAccount: ObservableObject {
     }
     func cancelLogin() {generation=UUID();loginTask?.cancel();loginTask=nil;busy=false;code=""}
     func logout() async {
+        TriggerController.shared.cancelTranslations()
         cancelLogin();let old=token
         // Clearing local credentials is mandatory even when the server cannot be reached.
         guard Credentials.saveCloudAPIKey("") else {message="Не удалось удалить сессию из Связки ключей.";return}
@@ -158,7 +161,8 @@ struct ManagedTranslationProvider: TranslationProvider {
     let id="artype"
     let token:String
     let tenant:String
-    @MainActor init(){token=ManagedAccount.shared.token;tenant=ManagedAccount.shared.selected}
+    let generation:UUID
+    @MainActor init(){token=ManagedAccount.shared.token;tenant=ManagedAccount.shared.selected;generation=ManagedAccount.shared.generation}
     func stream(_ request: TranslationRequest) -> AsyncThrowingStream<String,Error> {
         AsyncThrowingStream { continuation in
             let task=Task {
@@ -167,6 +171,7 @@ struct ManagedTranslationProvider: TranslationProvider {
                     let body=try ManagedProtocol.body(request,tenant:tenant)
                     let (data,_)=try await ManagedAPI.request("api/translate",method:"POST",body:body,token:token)
                     try Task.checkCancellation()
+                    guard ManagedAccount.shared.generation==generation, ManagedAccount.shared.selected==tenant else {throw CancellationError()}
                     continuation.yield(try ManagedProtocol.translation(data));continuation.finish()
                 }catch {continuation.finish(throwing:error)}
             }

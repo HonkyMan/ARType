@@ -722,13 +722,12 @@ void buildPages() {
     {
     std::vector<HWND> controls = {
         makeLabel(L"ARType " TYPETIDE_VERSION_STRING, x, y, 300, kAboutTitle, true),
-        makeLabel(L"System-wide AI translation && inline rewrite for Windows.\n"
-                  L"Private local models or secure OpenAI-compatible cloud APIs.",
+        makeLabel(L"Корпоративный перевод и замена текста в Windows.\n"
+                  L"Модель и доступ управляются сервером вашей организации.",
                   x, y + 28, w, kAboutDesc),
         make(L"SysLink",
              L"<a href=\"https://github.com/HonkyMan/ARType\">GitHub</a>   ·   "
-             L"<a href=\"https://xnu.app/ARType/\">Website</a>   ·   "
-             L"<a href=\"https://discord.gg/eGzEaP6TzR\">Discord</a>",
+             L"Основано на TypeTide · MIT License",
              WS_TABSTOP, x, y + 84, w, 22, kAboutLinks),
     };
     g.pages[7].insert(g.pages[7].end(), controls.begin(), controls.end());
@@ -809,14 +808,14 @@ void onCommand(int id, int code) {
     case kAccountLogout: {
         auto token=credentials::LoadCloudApiKey();
         if(!credentials::SaveCloudApiKey("")) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось удалить сессию из Credential Manager.");return;}
-        account::Logout(g.hwnd,kMsgAccount,token);translator::CancelAll();
+        account::Logout(g.hwnd,kMsgAccount,token);App::shared().cancelTranslations();
         s.tenantId.clear();s.openAIKey.clear();g.tenants.clear();
         SendMessageW(ctrl(kAccountTenant),CB_RESETCONTENT,0,0);s.save();
         SetWindowTextW(ctrl(kAccountMessage),L"Вы вышли из ARType.");return;
     }
     case kAccountTenant:
         if(code==CBN_SELCHANGE){auto index=(int)SendMessageW(ctrl(kAccountTenant),CB_GETCURSEL,0,0);
-            if(index>=0 && index<(int)g.tenants.size()){s.tenantId=g.tenants[index];s.save();}}
+            if(index>=0 && index<(int)g.tenants.size()){App::shared().cancelTranslations();s.tenantId=g.tenants[index];s.save();}}
         return;
     case kTab:
         if (code == LBN_SELCHANGE)
@@ -1163,6 +1162,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if(u->finished){EnableWindow(ctrl(kAccountLogin),TRUE);EnableWindow(ctrl(kAccountCancel),FALSE);}
         if(!u->message.empty())SetWindowTextW(ctrl(kAccountMessage),u->message.c_str());
         if(!u->token.empty()){
+            App::shared().cancelTranslations();
             if(!credentials::SaveCloudApiKey(u->token)) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось сохранить сессию в Credential Manager.");return 0;}
             Settings::shared().openAIKey=u->token;
             account::FetchProfile(hwnd,kMsgAccount,u->token);

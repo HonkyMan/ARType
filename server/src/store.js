@@ -59,10 +59,14 @@ export async function migrate(pool) {
   } finally {await c.query('SELECT pg_advisory_unlock(63821017)');c.release()}
 }
 export function operator(user,config) {return config.adminEmails.includes(user.email)}
+export async function activateMemberships(c,email) {
+  const locked=await c.query("SELECT t.id FROM tenants t JOIN memberships m ON t.id=m.tenant_id WHERE m.email=$1 AND m.status='invited' ORDER BY t.id FOR UPDATE OF t",[email]);
+  if(locked.rowCount)await c.query("UPDATE memberships SET status='active' WHERE email=$1 AND tenant_id=ANY($2::uuid[]) AND status='invited' AND expires_at>clock_timestamp()",[email,locked.rows.map(t=>t.id)]);
+}
 export async function access(c,tenantId,user,config,{manage=false,lock=false}={}) {
   const t=(await c.query(`SELECT * FROM tenants WHERE id=$1 ${lock?'FOR UPDATE':''}`,[tenantId])).rows[0];
   if(!t) fail(403,'no_access','Организация недоступна.');
-  const m=(await c.query("SELECT * FROM memberships WHERE tenant_id=$1 AND email=$2 AND (status='active' OR (status='invited' AND expires_at>now()))",[tenantId,user.email])).rows[0];
+  const m=(await c.query("SELECT * FROM memberships WHERE tenant_id=$1 AND email=$2 AND (status='active' OR (status='invited' AND expires_at>clock_timestamp()))",[tenantId,user.email])).rows[0];
   if(!operator(user,config) && (!m || (manage && !['owner','admin'].includes(m.role)))) fail(403,'no_access','Недостаточно прав.');
   return {...t,role:operator(user,config)?'operator':m.role};
 }

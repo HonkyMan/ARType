@@ -18,6 +18,7 @@ enum TextReplacer {
     @MainActor
     @discardableResult
     static func replace(with text: String, selectAll: Bool) async -> Bool {
+        guard !Task.isCancelled else {return false}
         let start = ContinuousClock.now
 #if DEBUG
         if let replacementOverride {
@@ -39,6 +40,11 @@ enum TextReplacer {
                 return false
             }
             try? await Task.sleep(nanoseconds: 40_000_000)
+        }
+        guard !Task.isCancelled else {
+            PasteboardHelper.restore(saved)
+            recordReplacement(outcome: "cancelled", start: start)
+            return false
         }
         guard Keyboard.press(Keyboard.vKey, command: true) else {
             PasteboardHelper.restore(saved)

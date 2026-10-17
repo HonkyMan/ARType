@@ -37,6 +37,7 @@ public:
     /// 根据开关 + 快捷键 + 划词设置重新装配触发（设置变化后调用）
     void applyEnabledState();
     void openSettings();
+    void cancelTranslations();
 
 private:
     App() = default;
@@ -48,6 +49,7 @@ private:
         std::wstring error;
     };
     struct RewriteResult {
+        uint64_t generation;
         bool ok;
         std::wstring text;    // 译文（ok 时）
         std::wstring error;
@@ -79,6 +81,7 @@ private:
     HWND hwnd_ = nullptr;
     TrayIcon tray_;
     uint64_t currentReq_ = 0;
+    uint64_t contextGeneration_ = 0;
     std::optional<Language> currentSource_;   // 弹窗重定向语言时沿用
     std::wstring currentText_;
     RewriteStyle currentStyle_ = RewriteStyle::Faithful;

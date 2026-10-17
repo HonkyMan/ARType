@@ -1,8 +1,8 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { access, audit, fail, HttpError, operator, reserve, transaction, uid } from './store.js';
-import { installAuth } from './auth.js';
+import { access, activateMemberships, audit, fail, HttpError, operator, reserve, transaction, uid } from './store.js';
+import { hash, installAuth } from './auth.js';
 import { providerPayload } from './provider.js';
 
 const languages=['en','ru','zh','hi','es','fr','ar','bn','pt','id'];
@@ -13,28 +13,36 @@ const settings=z.object({name:z.string().trim().min(1).max(120),status:z.enum(['
   concurrency:z.number().int().min(1).max(500),model:z.string().trim().min(1).max(200),credential:z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   instructions:z.string().max(8000),languages:z.array(z.enum(languages)).min(1).max(10).refine(a=>new Set(a).size===a.length),access_until:z.iso.datetime({offset:true}).nullable()});
 const validate=(schema,value)=>{const r=schema.safeParse(value);if(!r.success)fail(422,'invalid_input','Проверьте введённые значения.');return r.data;};
-const isSeated="(status='active' OR (status='invited' AND expires_at>now()))";
+const isSeated="(status='active' OR (status='invited' AND expires_at>clock_timestamp()))";
 const csvCell=v=>`"${String(v??'').replace(/^[=+@\-\t\r]/,'\'$&').replaceAll('"','""')}"`;
 
 export function createApp({pool,config,google,translate}) {
   const app=express();app.disable('x-powered-by');
+  if(config.trustProxy)app.set('trust proxy',1);
   const throttle=new Map();
-  app.use((req,res,next)=>{
+  app.use(express.json({limit:'100kb'}));
+  app.use(async(req,res,next)=>{
     res.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',
       'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Cache-Control':'no-store'});
     if(config.secure)res.set('Strict-Transport-Security','max-age=31536000');
     if(req.path.startsWith('/api/device') || req.path==='/auth/google') {
-      const now=Date.now(),key=req.ip,entry=throttle.get(key);
+      let key=req.ip,limit=200;
+      // An office can have many legitimate devices behind one public IP.
+      // Only a valid pairing secret earns a separate polling allowance.
+      if(req.path==='/api/device/poll' && uuid.safeParse(req.body?.id).success && typeof req.body?.poll_token==='string' && req.body.poll_token.length<=200) {
+        const d=await pool.query('SELECT id FROM devices WHERE id=$1 AND poll_hash=$2 AND expires_at>now()',[req.body.id,hash(req.body.poll_token)]);
+        if(d.rowCount){key='device:'+d.rows[0].id;limit=30;}
+      }
+      const now=Date.now(),entry=throttle.get(key);
       if(!entry || entry.until<now){if(throttle.size>10000)for(const [k,v] of throttle)if(v.until<now)throttle.delete(k);throttle.set(key,{n:1,until:now+60000})}
-      else if(++entry.n>200)return res.status(429).json({error:{code:'rate_limit',message:'Подождите минуту и повторите вход.'}});
+      else if(++entry.n>limit)return res.status(429).json({error:{code:'rate_limit',message:'Подождите минуту и повторите вход.'}});
     }next();
   });
-  app.use(express.json({limit:'100kb'}));
   app.get('/health',async(req,res)=>{await pool.query('SELECT 1');res.json({status:'ok',service:'ARType'})});
   const auth=installAuth(app,{pool,config,google,validate,z});
   app.use('/api',auth);
   app.get('/api/me',async(req,res)=>{
-    await pool.query("UPDATE memberships SET status='active' WHERE email=$1 AND status='invited' AND expires_at>now()",[req.user.email]);
+    await transaction(pool,c=>activateMemberships(c,req.user.email));
     const ts=operator(req.user,config)
       ? await pool.query("SELECT t.*,'operator' AS role FROM tenants t ORDER BY created_at")
       : await pool.query("SELECT t.*,m.role FROM tenants t JOIN memberships m ON t.id=m.tenant_id WHERE m.email=$1 AND m.status='active' ORDER BY t.created_at",[req.user.email]);
@@ -103,7 +111,7 @@ export function createApp({pool,config,google,translate}) {
       if(t.role==='admin' && (m.role!=='member' || (b.role && b.role!=='member')))fail(403,'owner_required','Требуются права владельца.');
       const next={...m,...b};
       if(m.role==='owner' && m.status!=='disabled' && (next.role!=='owner' || next.status==='disabled') &&
-        (await c.query("SELECT count(*)::int n FROM memberships WHERE tenant_id=$1 AND role='owner' AND status!='disabled'",[id])).rows[0].n<=1)fail(409,'last_owner','Сначала назначьте другого владельца.');
+        !(await c.query("SELECT id FROM memberships WHERE tenant_id=$1 AND id!=$2 AND role='owner' AND status='active'",[id,member])).rowCount)fail(409,'last_owner','Сначала назначьте другого владельца и дождитесь его входа.');
       const wasSeated=m.status==='active' || (m.status==='invited' && new Date(m.expires_at)>new Date());
       if(!wasSeated && next.status!=='disabled' && (await c.query(`SELECT count(*)::int n FROM memberships WHERE tenant_id=$1 AND ${isSeated}`,[id])).rows[0].n>=t.seats)fail(409,'seats_full','Все места заняты.');
       await c.query("UPDATE memberships SET role=$1,status=$2,expires_at=now()+interval '7 days' WHERE id=$3",[next.role,next.status,member]);

@@ -55,4 +55,6 @@ node_modules/
 coverage/
 test-results/
 playwright-report/
+.playwright-cli/
+output/
 *.log

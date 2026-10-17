@@ -9,11 +9,13 @@
 #pragma once
 #include <windows.h>
 #include <optional>
+#include <cstdint>
 #include <string>
 
 namespace capture {
 
 struct Capture {
+    uint64_t generation = 0;
     std::wstring text;
     /// true = 取的是整个输入框（替换时需先全选）；false = 当前选区
     bool isWholeField = false;

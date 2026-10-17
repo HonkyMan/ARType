@@ -81,6 +81,14 @@ bool App::init(HINSTANCE inst) {
     return true;
 }
 
+void App::cancelTranslations() {
+    ++contextGeneration_;
+    currentReq_=0;
+    translator::CancelAll();
+    PopupWindow::shared().close();
+    SelectionIcon::shared().hide();
+}
+
 void App::applyEnabledState() {
     UnregisterHotKey(hwnd_, kReadHotkeyId);
     UnregisterHotKey(hwnd_, kRewriteHotkeyId);
@@ -243,13 +251,15 @@ void App::handleRead(std::optional<Language> targetOverride) {
         return;
     }
     HWND hwnd = hwnd_;
-    std::thread([hwnd, targetOverride] {
+    const auto generation=contextGeneration_;
+    std::thread([hwnd, targetOverride, generation] {
         auto copied = capture::ClipboardFallbackCopy();
         capture::Capture* cap = nullptr;
         if (copied) {
             diagnostics::Record("selectionCapture", "success", {}, "clipboardFallback", {}, -1, -1,
                                 (int)copied->size());
             cap = new capture::Capture;
+            cap->generation=generation;
             cap->text = *copied;
             cap->anchor = capture::CursorAnchor();
             cap->hasAnchor = true;
@@ -338,13 +348,15 @@ void App::handleRewrite(std::optional<Language> targetOverride) {
         return;
     }
     HWND hwnd = hwnd_;
-    std::thread([hwnd, targetOverride] {
+    const auto generation=contextGeneration_;
+    std::thread([hwnd, targetOverride, generation] {
         auto copied = capture::ClipboardFallbackCopy();
         capture::Capture* cap = nullptr;
         if (copied) {
             diagnostics::Record("selectionCapture", "success", {}, "clipboardFallback", {}, -1, -1,
                                 (int)copied->size());
             cap = new capture::Capture;
+            cap->generation=generation;
             cap->text = *copied;
             cap->anchor = capture::CursorAnchor();
             cap->hasAnchor = true;
@@ -406,17 +418,19 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
             std::wstring result;
         };
         auto state = std::make_shared<RewriteStreamState>();
+        const auto generation=contextGeneration_;
         translator::Stream(
             {c.text, d.from, d.to, style},
             [state](uint64_t, const std::wstring& delta) {
                 std::lock_guard lock(state->mutex);
                 state->result += delta;
             },
-            [hwnd, state, c, d](uint64_t, bool ok, const std::wstring& error) {
+            [hwnd, state, c, d, generation](uint64_t, bool ok, const std::wstring& error) {
                 std::lock_guard lock(state->mutex);
                 std::wstring cleaned = util::Trim(state->result);
                 const bool emptyResponse = ok && cleaned.empty();
                 auto* msg = new RewriteResult{
+                    generation,
                     ok && !cleaned.empty(),
                     std::move(cleaned),
                     emptyResponse ? L"Empty translation" : error,
@@ -483,6 +497,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_APP_REWRITE_DONE: {
         auto* r = (RewriteResult*)lp;
+        if(r->generation!=contextGeneration_){delete r;return 0;}
         if (r->ok)
             replacer::ReplaceAsync(std::move(r->text), r->isWholeField);
         else
@@ -511,6 +526,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_READ_CAPTURED: {
         auto* cap = (capture::Capture*)lp;
         if (cap) {
+            if(cap->generation!=contextGeneration_){delete cap;return 0;}
             std::optional<Language> target = wp ? std::optional<Language>((Language)((int)wp - 1)) : std::nullopt;
             presentRead(*cap, target);
             delete cap;
@@ -521,6 +537,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_REWRITE_CAPTURED: {
         auto* cap = (capture::Capture*)lp;
         if (cap) {
+            if(cap->generation!=contextGeneration_){delete cap;return 0;}
             std::optional<Language> target = wp ? std::optional<Language>((Language)((int)wp - 1)) : std::nullopt;
             proceedRewrite(*cap, target);
             delete cap;

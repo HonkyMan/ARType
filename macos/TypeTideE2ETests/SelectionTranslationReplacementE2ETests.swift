@@ -78,4 +78,18 @@ final class SelectionTranslationReplacementE2ETests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
     }
+
+    func testOrganizationSwitchClosesTranslationFromPreviousAccountContext() async throws {
+        let previous = ManagedAccount.shared.selected
+        let oldNative = LanguageConfig.sourceLanguage
+        let oldForeign = LanguageConfig.targetLanguage
+        defer { ManagedAccount.shared.selected = previous; LanguageConfig.sourceLanguage = oldNative; LanguageConfig.targetLanguage = oldForeign }
+        LanguageConfig.sourceLanguage = .chinese
+        LanguageConfig.targetLanguage = .english
+        TranslationService.shared.providerOverride = MockStreamingProvider()
+        TriggerController.shared.presentRead(text: "你好世界", element: nil, range: nil, dismissOnInteraction: false)
+        XCTAssertTrue(PopupController.shared.isVisible)
+        ManagedAccount.shared.selected = UUID().uuidString
+        XCTAssertFalse(PopupController.shared.isVisible)
+    }
 }

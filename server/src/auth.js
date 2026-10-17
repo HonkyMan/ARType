@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
-import { fail, transaction, uid } from './store.js';
+import { activateMemberships, fail, transaction, uid } from './store.js';
 
 export const hash=s=>createHash('sha256').update(s).digest('hex');
 export const secret=()=>randomBytes(32).toString('base64url');
@@ -66,12 +66,13 @@ export function installAuth(app,{pool,config,google,validate,z}) {
     if(!claims || !same(claims.nonce,row.nonce) || claims.email_verified!==true || typeof claims.sub!=='string' || !claims.sub || typeof claims.email!=='string')fail(400,'oauth_identity','Google не подтвердил личность и email.');
     const email=validate(z.email().max(254),claims.email.toLowerCase());
     const session=await transaction(pool,async c=>{
+      for(const key of [`email:${email}`,`sub:${claims.sub}`].sort())await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
       const existing=(await c.query('SELECT id,sub FROM users WHERE email=$1 OR sub=$2 FOR UPDATE',[email,claims.sub])).rows;
       if(existing.some(u=>u.sub!==claims.sub))fail(403,'identity_conflict','Email связан с другой учётной записью. Обратитесь к администратору.');
       const id=existing[0]?.id || uid();
-      await c.query('INSERT INTO users(id,sub,email,name) VALUES($1,$2,$3,$4) ON CONFLICT(sub) DO UPDATE SET email=$3,name=$4',[id,claims.sub,email,String(claims.name||email).slice(0,200)]);
-      await c.query("UPDATE memberships SET status='active' WHERE email=$1 AND status='invited' AND expires_at>now()",[email]);
-      return issueSession(c,id,'web');
+      const actual=(await c.query('INSERT INTO users(id,sub,email,name) VALUES($1,$2,$3,$4) ON CONFLICT(sub) DO UPDATE SET email=$3,name=$4 RETURNING id',[id,claims.sub,email,String(claims.name||email).slice(0,200)])).rows[0].id;
+      await activateMemberships(c,email);
+      return issueSession(c,actual,'web');
     });
     cookie(res,'artype_session',session.token,config,604800);
     res.redirect(row.device_id?`/?device=${row.device_id}`:'/');
