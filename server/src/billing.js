@@ -14,19 +14,20 @@ export function ledgerNumbers(row) {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, moneyColumns.has(key) ? Number(value) : value]));
 }
 
-async function billingDue(db, tenant, period, settings) {
+async function billingDue(db, tenant, period, settings, emails = null) {
   const subscription = await db.query('SELECT 1 FROM subscription_charges WHERE tenant_id=$1 AND period=$2', [tenant.id, period]);
   const unpaid = tenant.plan === 'plus' ? {rows: []} : await db.query(`
     SELECT m.email FROM memberships m
     LEFT JOIN seat_charges s ON s.tenant_id=m.tenant_id AND s.email=m.email AND s.period=$2
-    WHERE m.tenant_id=$1 AND m.product_enabled AND ${seatedMembership} AND s.email IS NULL ORDER BY m.email
-  `, [tenant.id, period]);
+    WHERE m.tenant_id=$1 AND m.product_enabled AND ${seatedMembership} AND s.email IS NULL
+      AND ($3::text[] IS NULL OR m.email=ANY($3)) ORDER BY m.email
+  `, [tenant.id, period, emails]);
   const basePrice = settings[tenant.plan + '_price_cents'];
   const baseDue = subscription.rowCount ? 0 : basePrice;
   return {basePrice, baseDue, basePaid: !!subscription.rowCount, unpaid: unpaid.rows, total: baseDue + unpaid.rows.length * settings.unit_price_cents};
 }
 
-export async function reconcileTenantBilling(db, tenantId, period) {
+export async function reconcileTenantBilling(db, tenantId, period, emails = null) {
   // All enrollment, renewal and payment writers lock the workspace first.
   const tenant = (await db.query('SELECT * FROM tenants WHERE id=$1 FOR UPDATE', [tenantId])).rows[0];
   if (!tenant) fail(404, 'tenant_missing');
@@ -34,7 +35,7 @@ export async function reconcileTenantBilling(db, tenantId, period) {
   await db.query('INSERT INTO tenant_wallets(tenant_id) VALUES($1) ON CONFLICT DO NOTHING', [tenantId]);
   const balance = Number((await db.query('SELECT balance_cents FROM tenant_wallets WHERE tenant_id=$1', [tenantId])).rows[0].balance_cents);
   const settings = await billingSettings(db);
-  const due = await billingDue(db, tenant, period, settings);
+  const due = await billingDue(db, tenant, period, settings, emails);
   const inactive = tenant.status !== 'active' || !tenant.renewal_enabled || (tenant.access_until && new Date(tenant.access_until) <= new Date());
   if (inactive || balance < due.total) return {pending_seats: due.unpaid.length, required_cents: due.total, missing_cents: Math.max(0, due.total - balance)};
   let remaining = balance;

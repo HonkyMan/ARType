@@ -36,10 +36,39 @@ when a later batch cannot be paid. Product access requires both subscription
 and seat payment (Plus needs only subscription payment), plus active membership
 and workspace status. Role alone never grants product access.
 
-Owners may turn off auto-renewal. Paid current-month access is preserved; future
-charges stop. New seats cannot be enabled while renewal is off. Turning renewal
-back on reconciles current charges immediately. Unpaid missed months are not
-charged retroactively. Disabled/expired memberships do not renew.
+There is no manual renewal switch or renewal HTTP endpoint in the console.
+Monthly renewal remains a server billing operation; future acquiring adapters
+can manage subscription lifecycle through the trusted domain service.
+Unpaid missed months are not charged retroactively. Disabled/expired memberships
+do not renew.
+
+### Explicit seat activation
+
+Invitations are free and start with app access disabled. Existing owners already
+appear in the table and can be selected like other employees. The table supports
+selection, select-all-visible, and one Connect/Disconnect action per selection.
+Search clears hidden selections. The server accepts up to 1,000 selected IDs.
+
+`POST /api/tenants/:id/member-access/quote` is read-only. It returns the exact
+current-month seat charge, any unpaid Business base subscription, already-paid
+seats, balance shortfall and next UTC billing date. Workspace administrators
+may act only on ordinary members and do not receive balance amounts.
+
+`POST /api/tenants/:id/member-access` requires the confirmed quote fingerprint
+and an idempotency UUID. Under the workspace lock it rechecks authorization,
+membership, capacity, subscription state, month, prices and balance. A stale
+quote requires a new confirmation. Insufficient funds reject the entire action
+without enabling employees or recording a charge. Only selected unpaid seats
+are charged by this operation. The same email/month is not charged twice.
+
+Disconnecting stops app access immediately, without refunding the current month.
+The dialog shows the next UTC month from which the selected seats will no longer
+be charged. Restoring console membership does not silently restore app access.
+Direct `product_enabled` membership patches are rejected.
+
+The `members.product` audit row uses the operation UUID as its primary key and
+retains the normalized request and result. Preserve these rows as the durable
+replay journal: they must not be purged by general audit-retention jobs.
 
 ## Payment boundary
 
@@ -66,6 +95,19 @@ unauthenticated endpoint. The adapter's provider/reference must identify the
 payment globally and consistently across retries. Failed settlement rolls back
 both the ledger and order. Cancellation/refunds require their own audited domain
 operations; they must not modify historical ledger rows.
+
+### Optional manual invoice inbox
+
+The operator's **Top-up requests** page displays workspace, requester, amount,
+date and status, with pending/paid/all filters and cursor pagination. The overview
+links to pending requests. Owner-facing text explicitly describes an invoice
+request, not a generated invoice document. Counts update on page load/refresh.
+
+`server/src/invoice-inbox.js` and the corresponding view are read-only projections
+of existing payment orders. Set `MANUAL_INVOICE_INBOX=0` and recreate the API to
+hide the navigation/overview notice and disable this endpoint. Payment-order
+creation, settlement, wallet history and translation access continue unchanged.
+This switch is tested with actual payment creation, settlement and entitlement.
 
 ## Localization
 

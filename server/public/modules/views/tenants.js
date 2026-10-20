@@ -36,17 +36,23 @@ export function createTenantViews({state, shell}) {
   }
 
 function appTag(m) {
-return m.app_status==='active'?`<span class="tag active">${tr('active_paid')}</span>`:m.app_status==='management_only'?`<span class="tag">${tr('console_only')}</span>`:`<span class="tag disabled">${tr('disabled')} · ${m.app_status==='awaiting_payment'?tr('awaiting_payment_344'):m.app_status==='suspended'?tr('workspace_suspended'):tr('disabled_346')}</span>`}
+return m.app_status==='active'?`<span class="tag active">${tr('active_paid')}</span>`:m.app_status==='disabled'?`<span class="tag">${tr('app_not_connected')}</span>`:m.app_status==='management_only'?`<span class="tag">${tr('console_only')}</span>`:`<span class="tag disabled">${tr('disabled')} · ${m.app_status==='awaiting_payment'?tr('awaiting_payment_344'):m.app_status==='suspended'?tr('workspace_suspended'):tr('disabled_346')}</span>`}
 
 function teamTable(t,members) {
 return `<section class="panel">
       <div class="panel-head">
       <h2>${tr('team_members')}</h2><span class="muted">${members.length}</span>
       </div>
+      <div class="member-bulk-toolbar"><label class="select-all"><input type="checkbox" data-select-all-members> ${tr('select_visible_members')}</label>
+        <span data-selection-count role="status">${tr('selected_members_count',{count:0})}</span>
+        <div class="actions"><button type="button" data-members-action="enable" disabled>${tr('connect_selected')}</button>
+        <button type="button" class="secondary" data-members-action="disable" disabled>${tr('disconnect_selected')}</button></div></div>
+      <p class="table-hint">${tr('team_selection_hint')}</p>
       ${searchBox(tr('find_a_member'), "Google email")}<div class="table-wrap">
       <table data-responsive role="table">
       <thead>
       <tr>
+      <th>${tr('select_member')}</th>
       <th>${tr('member_362')}</th>
 
       <th>${tr('console_access_363')}</th>
@@ -55,13 +61,14 @@ return `<section class="panel">
       </tr>
       </thead>
       <tbody>${members.map(m=>`<tr data-filter-item data-search="${esc(m.email)}">
+      <td class="member-selection" data-label="${tr('select_member')}"><input type="checkbox" data-select-member="${m.id}" aria-label="${tr('select_member')} ${esc(m.email)}" ${t.role==='admin'&&m.role!=='member'||!m.product_enabled&&(m.status==='disabled'||m.status==='invited'&&new Date(m.expires_at)<=new Date())?'disabled':''}></td>
       <td data-label="${tr('member_356')}" class="member-identity"><strong>${esc(m.email)}</strong>${m.status==='invited'?`<br><small>${new Date(m.expires_at)>new Date()?tr('invited_until'):tr('expired')} ${new Date(m.expires_at).toLocaleDateString(intlLocale())}</small>`:''}${m.paid_until?`<br><small>${tr('paid_until')} ${new Date(m.paid_until).toLocaleDateString(intlLocale(),{timeZone:'UTC'})}</small>`:''}</td>
 
       <td data-label="${tr('console_access')}">${tag(m.status)}</td>
       <td data-label="${tr('app')}">${appTag(m)}</td>
       <td data-label="${tr('role_and_actions')}">
       <div class="row-actions">${t.role==='admin'&&m.role!=='member'?roles[m.role]:`<select aria-label="${tr('role')} ${esc(m.email)}" data-role-member="${m.id}" data-role-tenant="${t.id}">${Object.entries(roles).filter(([r])=>r!=='operator'&&(t.role!=='admin'||r==='member')).map(([r,v])=>`<option value="${r}" ${m.role===r?'selected':''}>${v}</option>`).join('')}</select>
-      <button class="quiet small" data-product-member="${m.id}" data-member-tenant="${t.id}" data-product="${!m.product_enabled}">${m.product_enabled?tr('disable_app'):tr('enable_app')}</button>${m.role==='owner'?'':`<button class="quiet small danger" data-member="${m.id}" data-member-tenant="${t.id}" data-status="${m.status==='disabled'||m.status==='invited'&&new Date(m.expires_at)<=new Date()?'invited':'disabled'}">${m.status==='disabled'||m.status==='invited'&&new Date(m.expires_at)<=new Date()?tr('invite_again'):tr('disable_access')}</button>`}`}</div>
+      ${m.role==='owner'?'':`<button class="quiet small danger" data-member="${m.id}" data-member-tenant="${t.id}" data-status="${m.status==='disabled'||m.status==='invited'&&new Date(m.expires_at)<=new Date()?'invited':'disabled'}">${m.status==='disabled'||m.status==='invited'&&new Date(m.expires_at)<=new Date()?tr('invite_again'):tr('block_console_sign_in')}</button>`}`}</div>
       </td>
       </tr>`).join('')}</tbody>
       </table>
@@ -71,6 +78,7 @@ return `<section class="panel">
       <div class="panel-head">
       <h2>${tr('invite_member_365')}</h2>
       </div>
+      <p class="legal">${tr('invitation_is_free')}</p>
       <form class="panel-body" data-form="invite" data-tenant-id="${t.id}">
       <div class="inline-form">
       <label>Google email<input type="email" name="email" placeholder="colleague@company.com" required>

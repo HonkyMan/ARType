@@ -42,8 +42,8 @@ function browserStorage() {
 function browserFixture(storage = browserStorage(), hash = '') {
   const listeners = {};
   const root = {
-    innerHTML: '', addEventListener(name, handler) { listeners[name] = handler; },
-    querySelector() { return null; },
+    innerHTML: '', addEventListener(name, handler) { const previous=listeners[name]; listeners[name]=event=>Promise.all([previous?.(event),handler(event)]); },
+    querySelector() { return null; }, querySelectorAll() {return [];},
   };
   const message = {textContent: '', hidden: true, querySelector() {return {textContent:''};}};
   const pending = [];
@@ -86,7 +86,7 @@ function browserFixture(storage = browserStorage(), hash = '') {
   };
   const signIn = async (profile = memberProfile) => {
     await settle(next('/api/me'), profile);
-    if (profile.operator && location.hash === '#dashboard') await settle(next('/api/dashboard'), dashboard);
+    if (profile.operator && location.hash === '#dashboard') {await settle(next('/api/dashboard'), dashboard);if(profile.features?.invoice_inbox!==false)await settle(next('/api/invoice-requests'),{requests:[],pending_count:0});}
     if (!profile.operator && !profile.tenants.length && location.hash === '#new-workspace') await settle(next('/api/plans'), {plans:[{plan:'plus',price_cents:500,seat_price_cents:0,registration_enabled:true},{plan:'business',price_cents:1000,seat_price_cents:500,registration_enabled:true}]});
     await ready;
   };
@@ -647,6 +647,7 @@ test('a failed initial dashboard cannot overwrite the error state after navigati
   const app = browserFixture();
   await app.settle(app.next('/api/me'), operatorProfile);
   const initialDashboard = app.next('/api/dashboard');
+  await app.settle(app.next('/api/invoice-requests'),{requests:[],pending_count:0});
   const help = app.click({action: 'help'});
   await app.settle(app.next('/api/downloads'), {files: []});
   await help;
@@ -846,4 +847,16 @@ test('a new desktop user creates a workspace before approving the device and res
   await save;
   assert.match(app.root.innerHTML,/123456/);
   assert.match(app.root.innerHTML,/data-approve="device-1"/);
+});
+
+test('optional invoice inbox can be hidden without blocking dashboard or workspace navigation',async()=>{
+  const app=browserFixture();
+  await app.signIn({...operatorProfile,features:{invoice_inbox:false}});
+  assert.match(app.root.innerHTML,/<h1>Обзор платформы<\/h1>/);
+  assert.doesNotMatch(app.root.innerHTML,/data-action="invoice-requests"/);
+  assert.ok(!app.pending.some(r=>r.path.startsWith('/api/invoice-requests')));
+  const redirected=app.application.invoiceInboxPage();
+  await app.settle(app.next('/api/tenants'),{tenants:[]});
+  await redirected;
+  assert.equal(app.location.hash,'#home');
 });

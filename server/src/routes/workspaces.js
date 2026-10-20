@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { validate, uuid, settings } from '../schemas.js';
-import { planCatalog, planConfiguration, savePlanConfiguration, createWorkspace, setRenewal } from '../workspaces.js';
+import { planCatalog, planConfiguration, savePlanConfiguration, createWorkspace } from '../workspaces.js';
 import { createPaymentOrder, settleManualPayment } from '../payments.js';
 const plan = z.enum(['plus','business']);
 const creation = z.object({plan, name: settings.shape.name, idempotency_key: uuid}).strict();
@@ -17,10 +17,6 @@ export function installWorkspaces(app, {pool, config}) {
     res.json({ok: true});
   });
   app.post('/api/workspaces', async (req,res) => res.status(201).json(await createWorkspace(pool, config, req.user, validate(creation, req.body))));
-  app.put('/api/tenants/:id/renewal', async (req,res) => {
-    await setRenewal(pool, config, req.user, validate(uuid, req.params.id), validate(z.object({enabled:z.boolean()}).strict(), req.body).enabled);
-    res.json({ok: true});
-  });
   app.post('/api/tenants/:id/payment-orders', async (req,res) => res.status(201).json(await createPaymentOrder(pool, config, req.user,
     validate(uuid, req.params.id), validate(z.object({amount_cents: amount, idempotency_key: uuid}).strict(), req.body))));
   app.post('/api/payment-orders/:id/settle', async (req,res) => res.json(await settleManualPayment(pool, config, req.user,

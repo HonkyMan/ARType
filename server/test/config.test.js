@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { loadConfig } from '../src/config.js';
 
 const environment = { DATABASE_URL: 'postgresql://artype@localhost/artype_test' };
+test('manual invoice inbox can be disabled without changing other configuration',()=>{
+  assert.equal(loadConfig(environment).invoiceInboxEnabled,true);
+  assert.equal(loadConfig({...environment,MANUAL_INVOICE_INBOX:'0'}).invoiceInboxEnabled,false);
+  assert.throws(()=>loadConfig({...environment,MANUAL_INVOICE_INBOX:'false'}),/MANUAL_INVOICE_INBOX/);
+});
 
 test('configuration accepts HTTPS and HTTP loopback, but rejects other schemes', () => {
   for (const origin of ['https://translate.example.com', 'http://127.0.0.1:8080', 'http://[::1]:8080']) {

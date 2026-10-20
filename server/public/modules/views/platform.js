@@ -1,5 +1,6 @@
 import {t as tr, intlLocale} from '../i18n.js';
 import {planDefaultsForm} from './workspaces.js';
+import {invoiceInboxNotice} from './invoice-inbox.js';
 import {button, esc, fmt, money, tag} from '../format.js';
 import {searchBox, noMatches, saveActions} from './components.js';
 
@@ -27,7 +28,7 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       </section>`}
 
   function dashboard(data) {
-  shell(`<div class="grid">
+  shell(`${invoiceInboxNotice(data.inbox)}<div class="grid">
       <div class="metric">
       <div class="label">${tr('workspaces')}</div>
       <div class="value">${data.tenants.length}</div>

@@ -24,6 +24,7 @@ export function installProfile(app, { pool, config }) {
         ...entitlement,
       });
     }
-    res.json({ user: req.user, csrf: req.session.csrf, operator: isOperator, tenants });
+    res.json({ user: req.user, csrf: req.session.csrf, operator: isOperator, tenants,
+      features:{invoice_inbox:config.invoiceInboxEnabled !== false} });
   });
 }

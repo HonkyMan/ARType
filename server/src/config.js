@@ -29,6 +29,9 @@ export function loadConfig(env = process.env) {
     originOnly: true,
   });
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
+  if (env.MANUAL_INVOICE_INBOX !== undefined && !['0','1'].includes(env.MANUAL_INVOICE_INBOX)) {
+    throw new Error('MANUAL_INVOICE_INBOX must be 0 or 1');
+  }
 
   const port = Number(env.PORT ?? 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535');
@@ -54,6 +57,7 @@ export function loadConfig(env = process.env) {
     origin: origin.origin,
     secure: origin.protocol === 'https:',
     databaseURL: env.DATABASE_URL,
+    invoiceInboxEnabled: env.MANUAL_INVOICE_INBOX !== '0',
     adminEmails,
     googleClientId: env.GOOGLE_CLIENT_ID || '',
     googleClientSecret: env.GOOGLE_CLIENT_SECRET || '',

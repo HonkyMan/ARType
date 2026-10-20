@@ -30,6 +30,7 @@ services:
       PROVIDER_KEYS: ${PROVIDER_KEYS:-\{\}}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-google/gemma-3-4b-it}
+      MANUAL_INVOICE_INBOX: ${MANUAL_INVOICE_INBOX:-1}
       TRUST_PROXY: '1'
       DOWNLOADS_DIRECTORY: /app/downloads
     volumes: ['./releases:/app/downloads:ro']

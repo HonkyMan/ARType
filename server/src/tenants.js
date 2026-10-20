@@ -113,24 +113,13 @@ export async function inviteMember(pool, config, user, tenantId, body) {
     if (tenant.role === 'admin' && existing && existing.role !== 'member') {
       fail(403, 'owner_required');
     }
-    if (existing && (existing.role !== 'owner' || existing.product_enabled)) {
-      fail(409, 'already_member');
-    }
-    const productEnabled = existing ? true : body.role !== 'owner';
-    if (productEnabled && !tenant.renewal_enabled) fail(409, 'renewal_paused');
-    if (productEnabled && await occupiedSeats(db, tenantId) >= tenant.seats) {
-      fail(409, 'seats_full');
-    }
-    if (existing) {
-      // Buying a product seat does not replace an owner's management role.
-      await db.query('UPDATE memberships SET product_enabled=true WHERE id=$1', [existing.id]);
-    } else {
-      await db.query(`
-        INSERT INTO memberships(id,tenant_id,email,role,status,product_enabled)
-        VALUES($1,$2,$3,$4,'invited',$5)
-      `, [uid(), tenantId, body.email, body.role, productEnabled]);
-    }
-    await reconcileTenantBilling(db, tenantId);
+    if (existing) fail(409, 'already_member');
+    // Invitation grants console membership only. Buying app access always uses
+    // the explicit quote/confirmation flow, including the owner's own seat.
+    await db.query(`
+      INSERT INTO memberships(id,tenant_id,email,role,status,product_enabled)
+      VALUES($1,$2,$3,$4,'invited',false)
+    `, [uid(), tenantId, body.email, body.role]);
     await audit(db, user, 'member.invite', tenantId);
   });
 }
@@ -147,7 +136,7 @@ export async function updateMember(pool, config, user, tenantId, memberId, chang
       fail(403, 'owner_required');
     }
     const next = { ...member, ...changes };
-    if (next.product_enabled && next.status !== 'disabled' && (!member.product_enabled || member.status === 'disabled') && !tenant.renewal_enabled) fail(409, 'renewal_paused');
+    if ((changes.status && changes.status !== member.status) || !membershipEnabled(member)) next.product_enabled = false;
     const removesOwner = member.role === 'owner' && member.status !== 'disabled' &&
       (next.role !== 'owner' || next.status === 'disabled');
     if (removesOwner) {
@@ -159,16 +148,11 @@ export async function updateMember(pool, config, user, tenantId, memberId, chang
         fail(409, 'last_owner');
       }
     }
-    const wasSeated = member.product_enabled && membershipEnabled(member);
-    if (!wasSeated && next.product_enabled && next.status !== 'disabled' &&
-        await occupiedSeats(db, tenantId) >= tenant.seats) {
-      fail(409, 'seats_full');
-    }
     await db.query(`
-      UPDATE memberships SET role=$1,status=$2,product_enabled=$3,expires_at=now()+interval '7 days'
+      UPDATE memberships SET role=$1,status=$2,product_enabled=$3,
+        expires_at=CASE WHEN $5::boolean THEN now()+interval '7 days' ELSE expires_at END
       WHERE id=$4
-    `, [next.role, next.status, next.product_enabled, memberId]);
-    await reconcileTenantBilling(db, tenantId);
+    `, [next.role, next.status, next.product_enabled, memberId, changes.status === 'invited']);
     await audit(db, user, 'member.update', tenantId);
   });
 }

@@ -89,6 +89,7 @@ function shell(content,title,description,actions='') {
       <aside class="sidebar"><div class="sidebar-header">${brand}<button type="button" class="mobile-menu quiet" data-action="toggle-menu" aria-expanded="false" aria-controls="main-navigation">${tr('menu')}</button></div>
       <nav id="main-navigation" aria-label="${tr('main_navigation')}"><div class="nav-group"><div class="eyebrow">${tr('work')}</div>
       ${me.operator ? nav(tr('platform_overview'), 'dashboard', section === 'dashboard') : ''}
+      ${me.operator && me.features?.invoice_inbox !== false ? nav(tr('invoice_inbox'), 'invoice-requests', section === 'invoice-requests') : ''}
       ${nav(tr('workspaces_275'), 'home', ['home', 'new-tenant'].includes(section))}
       ${me.tenants.map(t=>`<button type="button" class="navitem tenant-nav ${current===t.id?'active':''}" data-tenant="${t.id}" ${current===t.id?'aria-current="page"':''}>${esc(t.name)}</button>`).join('')}</div>
       ${me.operator ? `<div class="nav-group"><div class="eyebrow">${tr('platform_settings')}</div>

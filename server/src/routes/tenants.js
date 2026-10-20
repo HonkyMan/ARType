@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requirePlatformAdmin } from '../access.js';
 import { settings, validate, uuid, email } from '../schemas.js';
+import { quoteMemberAccess, changeMemberAccess } from '../member-access.js';
 import {
   listTenants, createTenant, tenantDetails, updateTenant,
   inviteMember, updateMember, tenantUsageReport,
@@ -17,11 +18,21 @@ const invitation = z.object({ email, role: z.enum(['owner', 'admin', 'member']) 
 const membershipChanges = z.object({
   role: z.enum(['owner', 'admin', 'member']).optional(),
   status: z.enum(['active', 'disabled', 'invited']).optional(),
-  product_enabled: z.boolean().optional(),
+}).strict();
+const accessSelection = z.object({
+  member_ids: z.array(uuid).min(1).max(1000).refine(ids => new Set(ids).size === ids.length),
+  enabled: z.boolean(),
 }).strict();
 const csvCell = value => `"${String(value ?? '').replace(/^[=+@\-\t\r]/, "'$&").replaceAll('"', '""')}"`;
 
 export function installTenants(app, { pool, config }) {
+  app.post('/api/tenants/:id/member-access/quote', async (req,res) => {
+    res.json(await quoteMemberAccess(pool,config,req.user,validate(uuid,req.params.id),validate(accessSelection,req.body)));
+  });
+  app.post('/api/tenants/:id/member-access', async (req,res) => {
+    const body = validate(accessSelection.extend({quote_token:z.string().regex(/^[a-f0-9]{64}$/),idempotency_key:uuid}),req.body);
+    res.json(await changeMemberAccess(pool,config,req.user,validate(uuid,req.params.id),body));
+  });
   app.get('/api/tenants', async (req, res) => {
     res.json(await listTenants(pool, config, req.user));
   });

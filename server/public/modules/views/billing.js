@@ -15,9 +15,7 @@ if (!w) return '';
       <div class="panel-body">
       <p>${w.subscription_paid ? `<span class="tag active">${tr('subscription_paid')}</span>` : `<span class="tag disabled">${tr('subscription_awaiting_payment')}</span>`} · ${esc(w.period.slice(0,7))} · UTC</p>
       ${w.required_cents ? `<div class="notice warning">${tr(t.plan === 'plus' ? 'plus_activation_shortfall' : 'activation_shortfall',{required:money(w.required_cents),missing:money(w.missing_cents),count:w.pending_seats})}</div>` : `<p>${tr('all_current_charges_are_paid')}</p>`}
-      ${!w.renewal_enabled ? `<div class="notice">${tr('auto_renewal_is_off_paid_access_lasts_until_the_end_of_the_month')}</div>` : ''}
       <details class="explanation"><summary>${tr('how_billing_works')}</summary><p>${tr(t.plan === 'plus' ? 'plus_billing_explanation' : 'plus_includes_one_personal_seat_and_ai_business_has_a_workspace')}</p></details>
-      <form data-form="renewal" data-tenant-id="${t.id}" class="renewal-form"><input type="hidden" name="enabled" value="${!w.renewal_enabled}"><button class="quiet small">${w.renewal_enabled ? tr('turn_off_auto_renewal') : tr('turn_on_auto_renewal')}</button><p class="legal">${tr('turning_off_renewal_stops_future_charges_turning_it_on_immediate')}</p></form>
       <form id="invoice-request" class="invoice-placeholder" data-form="invoice" data-tenant-id="${t.id}" hidden>
       <div class="notice">${tr('online_payments_are_not_connected_yet_your_request_will_be_saved')}</div>
       <div class="inline-form"><label>${tr('top_up_amount_usd')}<input name="amount" inputmode="decimal" value="${(Math.max(w.missing_cents || 0,w.base_price_cents || 500)/100).toFixed(2)}" required></label><button>${tr('create_top_up_request')}</button></div>

@@ -9,6 +9,7 @@ import { createApp } from '../src/app.js';
 import { initializeSchema } from '../src/schema.js';
 import { transaction } from '../src/database.js';
 import {billingPeriod,reconcileTenantBilling,productAccess} from '../src/billing.js';
+import {setRenewal} from '../src/workspaces.js';
 
 const pool = new pg.Pool({connectionString: process.env.TEST_DATABASE_URL});
 const origin = 'http://127.0.0.1:43189';
@@ -21,19 +22,26 @@ async function actor(email) {
   const id=randomUUID(), token=randomUUID(), csrf=randomUUID();
   await pool.query('INSERT INTO users(id,sub,email,name) VALUES($1,$2,$3,$3)',[id,id,email]);
   await pool.query("INSERT INTO sessions(token_hash,user_id,csrf,kind,expires_at) VALUES($1,$2,$3,'web',now()+interval '1 day')",[hash(token),id,csrf]);
-  return {id,token,csrf};
+  return {id,token,csrf,email};
 }
 async function call(path, {actor:a, method='GET', body, headers={}}={}) {
   const r=await fetch(url+path,{method, headers:{...(a?{Cookie:`artype_session=${a.token}`,'X-CSRF-Token':a.csrf,Origin:origin}:{}),
     ...(body?{'Content-Type':'application/json'}:{}), ...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
   let data; const text=await r.text(); try{data=JSON.parse(text)}catch{data=text} return {status:r.status,data,headers:r.headers};
 }
+async function memberAccess(user, tenantId, emails, enabled=true) {
+  const ids=(await pool.query('SELECT id FROM memberships WHERE tenant_id=$1 AND email=ANY($2::text[]) ORDER BY id',[tenantId,emails])).rows.map(r=>r.id);
+  const selection={member_ids:ids,enabled};
+  const quote=await call(`/api/tenants/${tenantId}/member-access/quote`,{actor:user,method:'POST',body:selection});
+  if(quote.status!==200)return quote;
+  return call(`/api/tenants/${tenantId}/member-access`,{actor:user,method:'POST',body:{...selection,quote_token:quote.data.quote_token,idempotency_key:randomUUID()}});
+}
 async function tenant(op, owner, overrides={}, {paidOwner=true}={}) {
   const r=await call('/api/tenants',{actor:op,method:'POST',body:{name:'Acme',owner_email:owner,model:'test-model',credential:'main',...overrides}});
   assert.equal(r.status,201,JSON.stringify(r.data));
   if(paidOwner){
     assert.equal((await call(`/api/tenants/${r.data.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:100000,reason:'Test prepaid seats',idempotency_key:randomUUID()}})).status,200);
-    assert.equal((await call(`/api/tenants/${r.data.id}/members`,{actor:op,method:'POST',body:{email:owner,role:'member'}})).status,201);
+    assert.equal((await memberAccess(op,r.data.id,[owner])).status,200);
   }return r.data;
 }
 before(async()=>{
@@ -202,22 +210,23 @@ test('owners manage for free; self-enrollment is paid, per tenant and once per c
   const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
   const request=()=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'en'}});
   assert.equal((await request()).status,403);
-  const add=()=>call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'owner@example.com',role:'member'}});
-  assert.equal((await add()).status,201);
-  assert.equal((await request()).status,402);
+  const add=()=>memberAccess(owner,t.id,['owner@example.com']);
+  assert.equal((await add()).status,402);
+  assert.equal((await request()).status,403);
   const credit=await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:2000,reason:'Paid invoice',idempotency_key:randomUUID()}});
   assert.equal(credit.status,200);
+  assert.equal((await add()).status,200);
   assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,500);
   assert.equal((await request()).status,200);
   const own=(await call(`/api/tenants/${t.id}`,{actor:owner})).data.members[0];assert.equal(own.role,'owner');assert.equal(own.app_status,'active');
-  assert.equal((await call(`/api/tenants/${t.id}/members/${own.id}`,{actor:owner,method:'PATCH',body:{product_enabled:false}})).status,200);
+  assert.equal((await memberAccess(owner,t.id,[own.email],false)).status,200);
   assert.equal((await request()).status,403);
-  assert.equal((await add()).status,201);
+  assert.equal((await add()).status,200);
   assert.equal((await request()).status,200);
   assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,500);
   const second=await tenant(op,'owner@example.com',{}, {paidOwner:false});
-  await call(`/api/tenants/${second.id}/members`,{actor:owner,method:'POST',body:{email:'owner@example.com',role:'member'}});
-  assert.equal((await call(`/api/tenants/${second.id}`,{actor:owner})).data.members[0].app_status,'awaiting_payment');
+  assert.equal((await memberAccess(owner,second.id,['owner@example.com'])).status,402);
+  assert.equal((await call(`/api/tenants/${second.id}`,{actor:owner})).data.members[0].app_status,'management_only');
   const dashboard=(await call('/api/dashboard',{actor:op})).data;
   assert.equal(dashboard.invoice_amount_cents,1500);assert.equal(dashboard.billed_seats,1);
 });
@@ -238,6 +247,7 @@ test('monthly renewal is atomic, keeps historical prices and never renews disabl
   const credit=amount_cents=>call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents,reason:'Invoice paid',idempotency_key:randomUUID()}});
   await credit(2200);
   for(const email of ['a@example.com','b@example.com'])await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email,role:'member'}});
+  assert.equal((await memberAccess(owner,t.id,['a@example.com','b@example.com'])).status,200);
   const period=await billingPeriod(pool),next=new Date(period+'T00:00:00Z');next.setUTCMonth(next.getUTCMonth()+1);const future=next.toISOString().slice(0,10);
   const renew=()=>transaction(pool,c=>reconcileTenantBilling(c,t.id,future));
   const unpaid=await renew();assert.equal(unpaid.pending_seats,2);assert.equal(unpaid.missing_cents,1800);
@@ -307,11 +317,13 @@ test('only operator provisions tenants; member cannot read another tenant or see
   assert.ok(!JSON.stringify(me.data).includes('server-only-key'));
   assert.equal((await call(`/api/tenants/${ta.id}`,{actor:b})).status,403);
 });
-test('concurrent invitations cannot exceed seats and last owner cannot be removed',async()=>{
+test('concurrent connections cannot exceed seats and last owner cannot be removed',async()=>{
   const op=await actor('operator@example.com'), owner=await actor('owner@example.com');
   const t=await tenant(op,'owner@example.com',{seats:2});
   const rs=await Promise.all(['one','two'].map(e=>call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:`${e}@example.com`,role:'member'}})));
-  assert.deepEqual(rs.map(r=>r.status).sort(),[201,409]);
+  assert.deepEqual(rs.map(r=>r.status).sort(),[201,201]);
+  const activations=await Promise.all(['one','two'].map(e=>memberAccess(owner,t.id,[`${e}@example.com`])));
+  assert.deepEqual(activations.map(r=>r.status).sort(),[200,409]);
   const members=(await call(`/api/tenants/${t.id}`,{actor:owner})).data.members;
   const own=members.find(m=>m.email==='owner@example.com');
   assert.equal((await call(`/api/tenants/${t.id}/members/${own.id}`,{actor:owner,method:'PATCH',body:{status:'disabled'}})).status,409);
@@ -518,26 +530,28 @@ test('Plus pays one subscription including AI and cannot gain team management th
   assert.equal((await call('/api/me',{actor:user})).data.tenants.length,2);
 });
 
-test('Business charges base plus every seat, retains paid access on pause and stops renewal',async()=>{
+test('Business bills base plus seats; lifecycle renewal is internal and has no console endpoint',async()=>{
   const op=await actor('operator@example.com'),owner=await actor('business@example.com');
   await enablePlans(op);const w=await selfWorkspace(owner,'business');
-  await call(`/api/tenants/${w.id}/members`,{actor:owner,method:'POST',body:{email:'business@example.com',role:'member'}});
+  assert.equal((await memberAccess(owner,w.id,['business@example.com'])).status,402);
   const credit=amount_cents=>call(`/api/tenants/${w.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents,reason:'Business paid',idempotency_key:randomUUID()}});
   await credit(1499);
   let d=(await call(`/api/tenants/${w.id}`,{actor:owner})).data;
-  assert.equal(d.billing.balance_cents,1499);assert.equal(d.billing.missing_cents,1);assert.equal(d.members[0].app_status,'awaiting_payment');
-  await credit(1);d=(await call(`/api/tenants/${w.id}`,{actor:owner})).data;
+  assert.equal(d.billing.balance_cents,499);assert.equal((await memberAccess(owner,w.id,['business@example.com'])).status,402);
+  await credit(1);assert.equal((await memberAccess(owner,w.id,['business@example.com'])).status,200);d=(await call(`/api/tenants/${w.id}`,{actor:owner})).data;
   assert.equal(d.billing.balance_cents,0);assert.equal(d.members[0].can_translate,true);
   assert.deepEqual(d.billing.entries.filter(e=>e.source==='system').map(e=>e.delta_cents).sort((a,b)=>a-b),[-1000,-500]);
-  assert.equal((await call(`/api/tenants/${w.id}/renewal`,{actor:owner,method:'PUT',body:{enabled:false}})).status,200);
+  assert.equal((await call(`/api/tenants/${w.id}/renewal`,{actor:owner,method:'PUT',body:{enabled:false}})).status,404);
+  await setRenewal(pool,config,owner,w.id,false);
   assert.equal((await productAccess(pool,w.id,'business@example.com')).can_translate,true);
   await credit(2000);
   const next=new Date(await billingPeriod(pool)+'T00:00:00Z');next.setUTCMonth(next.getUTCMonth()+1);
   const period=next.toISOString().slice(0,10);
   await transaction(pool,db=>reconcileTenantBilling(db,w.id,period));
   assert.equal((await productAccess(pool,w.id,'business@example.com',period)).can_translate,false);
-  assert.equal((await call(`/api/tenants/${w.id}/members`,{actor:owner,method:'POST',body:{email:'new@example.com',role:'member'}})).status,409);
-  assert.equal((await call(`/api/tenants/${w.id}/renewal`,{actor:owner,method:'PUT',body:{enabled:true}})).status,200);
+  assert.equal((await call(`/api/tenants/${w.id}/members`,{actor:owner,method:'POST',body:{email:'new@example.com',role:'member'}})).status,201);
+  assert.equal((await memberAccess(owner,w.id,['new@example.com'])).status,409);
+  await setRenewal(pool,config,owner,w.id,true);
   await transaction(pool,db=>reconcileTenantBilling(db,w.id,period));
   assert.equal((await productAccess(pool,w.id,'business@example.com',period)).can_translate,true);
 });
@@ -563,4 +577,133 @@ test('payment requests survive reload; only admins settle and duplicate confirma
   assert.equal((await call(settle,{actor:op,method:'POST',body:{...payment,reference:'BANK-002'}})).status,409);
   const another=await call(path,{actor:owner,method:'POST',body:{...body,idempotency_key:randomUUID()}});
   assert.equal((await call(`/api/payment-orders/${another.data.id}/settle`,{actor:op,method:'POST',body:payment})).status,409);
+});
+
+test('bulk quote is read-only; insufficient funds reject every selected seat and legacy patch bypass',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  for(const email of ['a@example.com','b@example.com'])assert.equal((await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email,role:'member'}})).status,201);
+  const members=(await pool.query('SELECT * FROM memberships WHERE tenant_id=$1 ORDER BY email',[t.id])).rows;
+  assert.ok(members.every(m=>!m.product_enabled));
+  const selected=members.filter(m=>m.role==='member').map(m=>m.id), path=`/api/tenants/${t.id}/member-access`;
+  const body={member_ids:selected,enabled:true};
+  const quote=await call(path+'/quote',{actor:owner,method:'POST',body});
+  assert.equal(quote.status,200);assert.equal(quote.data.base_cents,1000);assert.equal(quote.data.seats_cents,1000);
+  assert.equal(quote.data.total_cents,2000);assert.equal(quote.data.missing_cents,2000);assert.equal(quote.data.allowed,false);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM balance_ledger WHERE tenant_id=$1',[t.id])).rows[0].n,0);
+  assert.equal((await call(path,{actor:owner,method:'POST',body:{...body,quote_token:quote.data.quote_token,idempotency_key:randomUUID()}})).status,402);
+  assert.equal((await call(`/api/tenants/${t.id}/members/${selected[0]}`,{actor:owner,method:'PATCH',body:{product_enabled:true}})).status,422);
+  assert.ok((await pool.query('SELECT product_enabled FROM memberships WHERE tenant_id=$1',[t.id])).rows.every(m=>!m.product_enabled));
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1',[t.id])).rows[0].n,0);
+});
+
+test('bulk confirmation is atomic and durably replayable; disabling stops renewal and reconnecting paid seats is free',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  for(const email of ['a@example.com','b@example.com'])await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email,role:'member'}});
+  await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:2000,reason:'Test deposit',idempotency_key:randomUUID()}});
+  const ids=(await pool.query("SELECT id FROM memberships WHERE tenant_id=$1 AND role='member' ORDER BY id",[t.id])).rows.map(m=>m.id);
+  const path=`/api/tenants/${t.id}/member-access`,selection={member_ids:ids,enabled:true};
+  const q=(await call(path+'/quote',{actor:owner,method:'POST',body:selection})).data;
+  assert.equal(q.allowed,true);assert.equal(q.total_cents,1000);
+  const body={...selection,quote_token:q.quote_token,idempotency_key:randomUUID()};
+  const results=await Promise.all([call(path,{actor:owner,method:'POST',body}),call(path,{actor:owner,method:'POST',body})]);
+  assert.deepEqual(results.map(r=>r.status),[200,200]);assert.deepEqual(results[0].data,results[1].data);
+  assert.equal((await pool.query('SELECT balance_cents FROM tenant_wallets WHERE tenant_id=$1',[t.id])).rows[0].balance_cents,'0');
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1',[t.id])).rows[0].n,2);
+  const disabled=await memberAccess(owner,t.id,['a@example.com','b@example.com'],false);
+  assert.equal(disabled.status,200);assert.equal(disabled.data.charged_cents,0);
+  assert.equal((await productAccess(pool,t.id,'a@example.com')).can_translate,false);
+  assert.equal((await call(path,{actor:owner,method:'POST',body})).status,200,'replaying an old successful operation must not reconnect seats');
+  assert.ok((await pool.query("SELECT product_enabled FROM memberships WHERE tenant_id=$1 AND role='member'",[t.id])).rows.every(m=>!m.product_enabled));
+  const free=(await call(path+'/quote',{actor:owner,method:'POST',body:selection})).data;
+  assert.equal(free.total_cents,0);assert.equal(free.already_paid_seats,2);assert.equal(free.allowed,true);
+  assert.equal((await memberAccess(owner,t.id,['a@example.com'])).status,200);
+  assert.equal((await productAccess(pool,t.id,'a@example.com')).can_translate,true);
+  assert.equal((await call(path,{actor:owner,method:'POST',body:{...body,enabled:false}})).status,409);
+  await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:1500,reason:'Next month deposit',idempotency_key:randomUUID()}});
+  await transaction(pool,db=>reconcileTenantBilling(db,t.id,disabled.data.next_period));
+  const future=(await pool.query('SELECT email FROM seat_charges WHERE tenant_id=$1 AND period=$2',[t.id,disabled.data.next_period])).rows;
+  assert.deepEqual(future.map(r=>r.email),['a@example.com']);
+});
+
+test('changed price or balance invalidates a quote; foreign, expired and elevated-role selections cannot bypass checks',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com'),admin=await actor('admin@example.com');
+  const t=await tenant(op,'owner@example.com'),other=await tenant(op,'other@example.com');
+  for(const [email,role] of [['admin@example.com','admin'],['a@example.com','member']])await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email,role}});
+  const members=(await pool.query('SELECT id,email FROM memberships WHERE tenant_id=$1',[t.id])).rows;
+  const id=email=>members.find(m=>m.email===email).id;
+  const path=`/api/tenants/${t.id}/member-access`,selection={member_ids:[id('a@example.com')],enabled:true};
+  const quote=()=>call(path+'/quote',{actor:owner,method:'POST',body:selection});
+  const apply=q=>call(path,{actor:owner,method:'POST',body:{...selection,quote_token:q.data.quote_token,idempotency_key:randomUUID()}});
+  const old=await quote();await pool.query('UPDATE billing_settings SET unit_price_cents=600');
+  assert.equal((await apply(old)).data.error.code,'access_quote_changed');
+  const fresh=await quote();await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:100,reason:'Concurrent deposit',idempotency_key:randomUUID()}});
+  assert.equal((await apply(fresh)).status,409);
+  assert.equal((await call(path+'/quote',{actor:admin,method:'POST',body:{member_ids:[id('owner@example.com')],enabled:true}})).status,403);
+  const adminQuote=await call(path+'/quote',{actor:admin,method:'POST',body:selection});
+  assert.equal(adminQuote.status,200);assert.equal(adminQuote.data.balance_cents,null);assert.equal(adminQuote.data.can_manage_balance,false);
+  const foreign=(await pool.query('SELECT id FROM memberships WHERE tenant_id=$1',[other.id])).rows[0].id;
+  assert.equal((await call(path+'/quote',{actor:owner,method:'POST',body:{member_ids:[foreign],enabled:true}})).status,404);
+  assert.equal((await call(path+'/quote',{actor:owner,method:'POST',body:{member_ids:[id('a@example.com'),id('a@example.com')],enabled:true}})).status,422);
+  await pool.query("UPDATE memberships SET expires_at=now()-interval '1 day' WHERE id=$1",[id('a@example.com')]);
+  const expired=await quote();assert.equal(expired.data.blocked,'members_inactive');assert.equal((await apply(expired)).status,409);
+});
+
+test('restoring console membership cannot silently buy or reconnect app access',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com');
+  await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'a@example.com',role:'member'}});
+  await memberAccess(owner,t.id,['a@example.com']);
+  const m=(await pool.query("SELECT id FROM memberships WHERE tenant_id=$1 AND email='a@example.com'",[t.id])).rows[0];
+  for(const status of ['disabled','invited'])assert.equal((await call(`/api/tenants/${t.id}/members/${m.id}`,{actor:owner,method:'PATCH',body:{status}})).status,200);
+  assert.equal((await pool.query('SELECT product_enabled FROM memberships WHERE id=$1',[m.id])).rows[0].product_enabled,false);
+});
+
+test('operator inbox shows requester and workspace, paginates without gaps, and excludes settled requests from pending',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  const order=(await call(`/api/tenants/${t.id}/payment-orders`,{actor:owner,method:'POST',body:{amount_cents:2000,idempotency_key:randomUUID()}})).data;
+  assert.equal((await call('/api/invoice-requests',{actor:owner})).status,403);
+  let inbox=(await call('/api/invoice-requests',{actor:op})).data;
+  assert.equal(inbox.pending_count,1);assert.equal(inbox.requests[0].requested_by,'owner@example.com');assert.equal(inbox.requests[0].workspace_name,'Acme');
+  await pool.query('INSERT INTO payment_orders(id,tenant_id,created_by,amount_cents,idempotency_key) SELECT gen_random_uuid(),$1,$2,100,gen_random_uuid() FROM generate_series(1,51)',[t.id,owner.id]);
+  inbox=(await call('/api/invoice-requests',{actor:op})).data;
+  assert.equal(inbox.requests.length,50);assert.equal(inbox.pending_count,52);
+  const page2=(await call('/api/invoice-requests?after='+inbox.next_cursor,{actor:op})).data;
+  assert.equal(page2.requests.length,2);assert.equal(new Set([...inbox.requests,...page2.requests].map(r=>r.id)).size,52);
+  await call(`/api/payment-orders/${order.id}/settle`,{actor:op,method:'POST',body:{amount_cents:2000,currency:'USD',reference:'PAID-INBOX-001'}});
+  assert.equal((await call('/api/invoice-requests',{actor:op})).data.pending_count,51);
+  const paid=(await call('/api/invoice-requests?status=paid',{actor:op})).data;
+  assert.equal(paid.requests.length,1);assert.equal(paid.requests[0].id,order.id);
+});
+
+test('disabling the optional inbox leaves payment creation, settlement and product access functional',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  const isolated=createApp({pool,config:{...config,invoiceInboxEnabled:false},google:{},translate:async()=>({text:'OK'})}).listen(0,'127.0.0.1');
+  await new Promise(resolve=>isolated.once('listening',resolve));
+  const priorURL=url;url=`http://127.0.0.1:${isolated.address().port}`;
+  try {
+    assert.equal((await call('/api/invoice-requests',{actor:op})).status,404);
+    assert.equal((await call('/api/me',{actor:op})).data.features.invoice_inbox,false);
+    const order=(await call(`/api/tenants/${t.id}/payment-orders`,{actor:owner,method:'POST',body:{amount_cents:1500,idempotency_key:randomUUID()}})).data;
+    assert.equal((await call(`/api/payment-orders/${order.id}/settle`,{actor:op,method:'POST',body:{amount_cents:1500,currency:'USD',reference:'WITHOUT-INBOX'}})).status,200);
+    assert.equal((await memberAccess(owner,t.id,['owner@example.com'])).status,200);
+    assert.equal((await productAccess(pool,t.id,'owner@example.com')).can_translate,true);
+  } finally {url=priorURL;await new Promise(resolve=>isolated.close(resolve));}
+});
+
+test('editing an expired invitation cannot extend it or silently reconnect its paid seat',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com');
+  await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'a@example.com',role:'member'}});
+  await memberAccess(owner,t.id,['a@example.com']);
+  const m=(await pool.query("UPDATE memberships SET expires_at=now()-interval '1 day' WHERE tenant_id=$1 AND email='a@example.com' RETURNING id,expires_at",[t.id])).rows[0];
+  assert.equal((await call(`/api/tenants/${t.id}/members/${m.id}`,{actor:owner,method:'PATCH',body:{role:'admin'}})).status,200);
+  let row=(await pool.query('SELECT * FROM memberships WHERE id=$1',[m.id])).rows[0];
+  assert.equal(row.product_enabled,false);assert.equal(row.expires_at.toISOString(),m.expires_at.toISOString());
+  assert.equal((await call(`/api/tenants/${t.id}/members/${m.id}`,{actor:owner,method:'PATCH',body:{status:'invited'}})).status,200);
+  row=(await pool.query('SELECT * FROM memberships WHERE id=$1',[m.id])).rows[0];
+  assert.equal(row.product_enabled,false);assert.ok(row.expires_at>new Date());
 });

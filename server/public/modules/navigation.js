@@ -52,8 +52,17 @@ export function createNavigation({state, api, views, location, history, balanceJ
   async function dashboardPage() {
     if (!state.me?.operator) return home();
     const ticket = begin('dashboard', tr('platform_overview'));
-    const data = await load(ticket, api.request('/api/dashboard'));
-    if (state.isCurrent(ticket)) views.dashboard(data);
+    const [data,inbox] = await load(ticket, Promise.all([api.request('/api/dashboard'),
+      state.me.features?.invoice_inbox !== false ? api.request('/api/invoice-requests') : Promise.resolve(null)]));
+    if (state.isCurrent(ticket)) views.dashboard({...data,inbox});
+  }
+
+  async function invoiceInboxPage(status='pending',after=null) {
+    if (!state.me?.operator || state.me.features?.invoice_inbox === false) return home();
+    const query=new URLSearchParams({status,...(after?{after}:{})});
+    const ticket=begin('invoice-requests',tr('invoice_inbox'),null,'#invoice-requests?'+query);
+    const data=await load(ticket,api.request('/api/invoice-requests?'+query));
+    if(state.isCurrent(ticket))views.invoiceInbox(data,status,after);
   }
 
   async function pricingPage() {
@@ -193,6 +202,10 @@ export function createNavigation({state, api, views, location, history, balanceJ
     const tenantMatch = /^#tenants\/([a-f0-9-]+)\/(team|translation|settings|usage|billing)$/.exec(hash);
     if (tenantMatch) return openTenant(tenantMatch[1], tenantMatch[2]);
     if (hash === '#admins') return adminsPage();
+    if (hash === '#invoice-requests' || hash.startsWith('#invoice-requests?')) {
+      const query=new URLSearchParams(hash.split('?')[1] || '');
+      return invoiceInboxPage(['pending','paid','all'].includes(query.get('status'))?query.get('status'):'pending',query.get('after'));
+    }
     if (hash === '#pricing') return pricingPage();
     if (hash === '#help') return helpPage();
     if (hash === '#home') return home();
@@ -200,7 +213,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
     return state.me?.operator ? dashboardPage() : home();
   }
 
-  const pages = {start, route, home, workspacePage, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
+  const pages = {start, route, home, workspacePage, invoiceInboxPage, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
   let renderedHash = location.hash;
   return Object.fromEntries(Object.entries(pages).map(([name, navigate]) => [name, (...args) => {
     const proceed = async () => {

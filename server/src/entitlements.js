@@ -8,7 +8,7 @@ export function describeProductAccess(member, tenantStatus, accessUntil, paid, p
 
   if (enabled && !member.product_enabled && member.role === 'owner') {
     status = 'management_only';
-    message = 'Вы управляете организацией бесплатно. Чтобы пользоваться ARType, добавьте себя как пользователя в кабинете.';
+    message = 'Вы управляете организацией бесплатно. Чтобы пользоваться ARType, выберите себя в списке сотрудников и подтвердите подключение программы.';
   } else if (enabled && member.product_enabled) {
     if (tenantStatus !== 'active' || (accessUntil && new Date(accessUntil) <= now)) {
       status = 'suspended';

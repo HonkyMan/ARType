@@ -58,20 +58,16 @@ export function installActions({
     const data = element.dataset;
     // Navigation is protected by request generations. Keep its trigger focusable
     // while the unsaved-changes dialog is open; lock only state-changing actions.
-    element.disabled = Boolean(data.productMember || data.removeAdmin || data.member ||
+    element.disabled = Boolean(data.removeAdmin || data.member ||
       data.approve || data.action === 'login' || data.action === 'logout');
     const ticket = state.snapshot();
     try {
       if (data.tenant) {
         await navigation.openTenant(data.tenant, data.section || 'team');
+      } else if (data.invoiceFilter) {
+        await navigation.invoiceInboxPage(data.invoiceFilter,data.invoiceAfter);
       } else if (data.editProvider) {
         await navigation.providerEditorPage(data.editProvider);
-      } else if (data.productMember) {
-        await api.request(`/api/tenants/${data.memberTenant}/members/${data.productMember}`, 'PATCH', {
-          product_enabled: data.product === 'true',
-        });
-        await reloadTenant(data.memberTenant, ticket);
-        views.toast(tr('app_access_updated'));
       } else if (data.removeAdmin) {
         await api.request('/api/platform-admins/' + encodeURIComponent(data.removeAdmin), 'DELETE');
         if (state.isCurrent(ticket)) await navigation.adminsPage();
@@ -141,6 +137,7 @@ export function installActions({
         root.querySelector('#invite-member input')?.focus();
         return;
       case 'dashboard': return navigation.dashboardPage();
+      case 'invoice-requests': return navigation.invoiceInboxPage();
       case 'home': return navigation.home();
       case 'provider': return navigation.providerPage();
       case 'provider-new': return navigation.providerEditorPage();
@@ -153,10 +150,6 @@ export function installActions({
       case 'copy-url':
         await navigator.clipboard.writeText(location.origin);
         if (state.isCurrent(ticket)) views.toast(tr('address_copied'));
-        return;
-      case 'copy-invoice':
-        await navigator.clipboard.writeText(root.querySelector('[data-invoice-text]').textContent.trim());
-        if (state.isCurrent(ticket)) views.toast(tr('invoice_request_copied'));
         return;
       default:
         if (action?.startsWith('section:') && state.details) {
@@ -273,11 +266,6 @@ export function installActions({
         delete form.dataset.dirty;
         if (state.isCurrent(ticket)) await navigation.pricingPage();
         views.toast(tr('registration_settings_saved'));
-        return;
-      case 'renewal':
-        await api.request(`/api/tenants/${tenant}/renewal`,'PUT',{enabled:values.enabled === 'true'});
-        delete form.dataset.dirty;
-        await reloadTenant(tenant,ticket);
         return;
       case 'settle-payment':
         await api.request(`/api/payment-orders/${form.dataset.orderId}/settle`,'POST',{amount_cents:cents(values.amount),currency:'USD',reference:values.reference});

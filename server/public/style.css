@@ -261,7 +261,28 @@ kbd { font: 12px/1.8 monospace; border: 1px solid #9b87b3; border-radius: 5px; p
 .payment-order code {overflow-wrap:anywhere}
 .payment-order form {flex:0 1 400px}
 .payment-order form button {margin-top:12px}
-.renewal-form {margin:20px 0}
+.member-bulk-toolbar {display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:18px 24px;background:var(--surface);border-bottom:1px solid var(--line)}
+.member-bulk-toolbar .actions {margin:0 0 0 auto;flex-wrap:wrap}
+.select-all {display:flex;align-items:center;gap:8px;font-size:13px}
+.member-selection input,.select-all input {width:20px;height:20px;accent-color:var(--accent);cursor:pointer}
+.member-selection input:disabled {cursor:not-allowed}
+.table-hint {font-size:13px;color:var(--muted);margin:14px 24px 0}
+.access-dialog {width:560px;max-height:calc(100dvh - 32px);overflow:auto}
+.access-dialog .actions {justify-content:flex-end;flex-wrap:wrap}
+.selected-members {max-height:150px;overflow:auto;padding-left:20px;overflow-wrap:anywhere}
+.charge-preview {margin:24px 0}
+.charge-preview>div {display:flex;justify-content:space-between;gap:20px;padding:10px 0}
+.charge-preview dd {margin:0;white-space:nowrap;font-weight:600}
+.charge-total {border-top:1px solid var(--line);font-size:18px;font-weight:650}
+.invoice-inbox-notice {display:flex;align-items:center;justify-content:space-between;gap:20px}
+.invoice-inbox-notice p {margin:8px 0 0}
+.invoice-request {display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px;border-bottom:1px solid var(--line)}
+.invoice-request:last-child {border-bottom:0}
+.invoice-request h2 {font-size:18px}
+.invoice-request code,.invoice-request small {overflow-wrap:anywhere}
+.invoice-request-action {display:grid;gap:12px;flex-shrink:0;text-align:right}
+.invoice-request-action>strong {font-size:24px}
+@media(max-width:760px){.member-bulk-toolbar{padding:16px}.member-bulk-toolbar .actions{width:100%;margin:0}.member-bulk-toolbar button{flex:1}.invoice-request,.invoice-inbox-notice{align-items:stretch;flex-direction:column}.invoice-request-action{text-align:left}.access-dialog{padding:20px}}
 .locale-control {display:flex;align-items:center;gap:8px;font-size:13px}
 .locale-control select {width:auto;min-width:115px}
 .login-content > .locale-control {justify-content:flex-end;margin-bottom:32px}
