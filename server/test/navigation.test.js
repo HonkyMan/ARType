@@ -46,8 +46,9 @@ function browserFixture(storage = browserStorage(), hash = '') {
   const message = {textContent: '', hidden: true};
   const pending = [];
   const location = {search: '', hash, origin: 'https://artype.test'};
+  const document = {querySelector(selector) { return selector === '#app' ? root : message; }};
   const application = createConsole({
-    document: {querySelector(selector) { return selector === '#app' ? root : message; }},
+    document,
     fetch(path, options) {
       const savedAtSend = [...(storage.values?.values() || [])];
       return new Promise((resolve, reject) => pending.push({path, options, savedAtSend, resolve, reject, settled: false}));
@@ -96,7 +97,7 @@ function browserFixture(storage = browserStorage(), hash = '') {
     };
   };
   const submit = form => listeners.submit({target: form, preventDefault() {}});
-  return {application, root, pending, message, next, settle, fail, signIn, click, form, submit, ready, location};
+  return {application, root, pending, message, next, settle, fail, signIn, click, form, submit, ready, location, document, listeners};
 }
 
 const connections = {
@@ -797,4 +798,29 @@ test('organization owner and administrator keep their distinct UI permissions af
     await app.click({action: 'section:billing'});
     assert.doesNotMatch(app.root.innerHTML, /data-form="balance"/);
   }
+});
+
+test('dirty navigation keeps its trigger focusable and restores focus after cancellation', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  app.document.body = {};
+  app.document.activeElement = app.document.body;
+  app.root.querySelector = selector => selector === 'form[data-dirty="true"]' ? {} : null;
+  let close;
+  app.message.addEventListener = (_name, handler) => { close = handler; };
+  app.message.showModal = () => {};
+  const trigger = {
+    dataset: {action: 'help'}, isConnected: true,
+    focus() {
+      assert.equal(this.disabled, false);
+      app.document.activeElement = this;
+    },
+  };
+  const click = app.listeners.click({target: {closest: selector => selector === 'button' ? trigger : null}});
+  assert.equal(trigger.disabled, false);
+  app.message.returnValue = 'cancel';
+  close();
+  await click;
+  assert.equal(app.document.activeElement, trigger);
+  assert.equal(app.pending.some(request => request.path === '/api/downloads'), false);
 });

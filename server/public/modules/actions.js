@@ -53,10 +53,13 @@ export function installActions({
     // Submit buttons belong to the submit handler. Disabling on click cancels
     // native form submission and validation in some browsers.
     if (!Object.keys(element.dataset).length) return;
-    element.disabled = true;
+    const data = element.dataset;
+    // Navigation is protected by request generations. Keep its trigger focusable
+    // while the unsaved-changes dialog is open; lock only state-changing actions.
+    element.disabled = Boolean(data.productMember || data.removeAdmin || data.member ||
+      data.approve || data.action === 'login' || data.action === 'logout');
     const ticket = state.snapshot();
     try {
-      const data = element.dataset;
       if (data.tenant) {
         await navigation.openTenant(data.tenant, 'team');
       } else if (data.editProvider) {
@@ -90,7 +93,11 @@ export function installActions({
     } catch (error) {
       report(error, ticket);
     } finally {
-      if (element.isConnected) element.disabled = false;
+      if (element.isConnected) {
+        element.disabled = false;
+        // Restore focus if a locked action lost it, without stealing form focus.
+        if (document.activeElement === document.body) element.focus?.();
+      }
     }
   });
 
