@@ -33,6 +33,7 @@ async function fixture(run) {
     'server/.dockerignore': '.env*\n', 'server/scripts/check.mjs': 'console.log("fixture check");\n',
     'docs/OPERATIONS.md': 'Fixture operations\n', 'docs/ACCEPTANCE.md': 'Fixture acceptance\n',
     'docs/ARCHITECTURE.md': 'Fixture architecture\n', 'docs/ARCHIVE.md': 'Historical content\n',
+    'docs/ROLES.md': 'Roles and permissions\n',
     'deployment/setup.sh': '#!/bin/sh\n', 'deployment/configure.mjs': '// fixture\n',
     'deployment/backup.sh': '#!/bin/sh\n', 'deployment/restore.sh': '#!/bin/sh\n',
     'deployment/Caddyfile': '# fixture\n', 'deployment/publish-downloads.mjs': '// fixture\n',
@@ -79,6 +80,7 @@ test('server package contains committed version and check entry point, excludes 
     const contents = mustRun(repo, 'tar', ['-tzf', archive]);
     assert.match(contents, /^ARType-server\/VERSION$/m);
     assert.match(contents, /^ARType-server\/server\/scripts\/check.mjs$/m);
+    assert.match(contents, /^ARType-server\/docs\/ROLES.md$/m);
     assert.doesNotMatch(contents, /(?:^|\/)\.env$|google-client\.json|node_modules/);
     assert.equal(digest(await readFile(archive)), digest(await readFile(join(second, filename))));
     assert.match(await readFile(archive + '.sha256', 'utf8'), new RegExp(`^${digest(await readFile(archive))}  ${filename.replaceAll('.', '\\.')}`));
