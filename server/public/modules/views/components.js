@@ -1,3 +1,4 @@
+import {t as tr, intlLocale} from '../i18n.js';
 import {esc, languages} from '../format.js';
 
 export function field(label, name, value, type = 'text', attributes = '') {
@@ -10,31 +11,31 @@ export function formSection(title, description, content) {
 
 export function languageOptions(selected) {
   return `<fieldset class="language-picker wide" data-languages>
-    <legend>Доступные языки</legend>
-    <p>Сотрудники смогут выбирать эти языки в приложении.</p>
+    <legend>${tr('available_languages')}</legend>
+    <p>${tr('members_can_choose_these_languages_in_the_app')}</p>
     <div class="language-options">${Object.entries(languages).map(([code, name]) => `<label>
       <input type="checkbox" name="languages" value="${code}" ${selected.includes(code) ? 'checked' : ''}>
       <span>${esc(name)}</span></label>`).join('')}</div>
-    <small>Нужен хотя бы один язык.</small></fieldset>`;
+    <small>${tr('at_least_one_language_is_required')}</small></fieldset>`;
 }
 
 export function connectionFields(state, selected, model) {
   const {connections} = state;
-  return `<label>AI-подключение<select name="credential" required>${connections.map(c =>
+  return `<label>${tr('ai_connection')}<select name="credential" required>${!selected?`<option value="" disabled selected>${tr('choose_connection')}</option>`:''}${connections.map(c =>
     `<option value="${esc(c.alias)}" ${c.alias === selected ? 'selected' : ''}>${esc(c.alias)}</option>`).join('')}</select>
     <small data-connection-url>${esc(connections.find(c => c.alias === selected)?.base_url || '')}</small></label>
-    ${field('Модель для этой организации', 'model', model, 'text', 'required maxlength="200"')}
-    <p class="wide field-hint">При выборе подключения подставляется его модель по умолчанию. Вы можете указать другую модель.</p>`;
+    ${field(tr('model_for_this_workspace'), 'model', model, 'text', 'required maxlength="200"')}
+    <p class="wide field-hint">${tr('selecting_a_connection_fills_in_its_default_model_you_can_choose')}</p>`;
 }
 
-export function searchBox(label, placeholder = 'Поиск по названию') {
+export function searchBox(label, placeholder = tr('search_by_name')) {
   return `<div class="table-toolbar"><label class="search-label">${label}
     <input type="search" data-filter placeholder="${placeholder}" autocomplete="off"></label>
     <span class="filter-count" data-filter-count role="status"></span></div>`;
 }
 
-export const noMatches = '<div class="empty" data-no-matches hidden><h3>Ничего не найдено</h3><p>Измените запрос или очистите поиск.</p></div>';
+export const noMatches = () => `<div class="empty" data-no-matches hidden><h3>${tr('no_matches')}</h3><p>${tr('change_your_query_or_clear_the_search')}</p></div>`;
 
-export function saveActions(label = 'Сохранить изменения') {
-  return `<div class="actions form-actions"><button type="submit">${label}</button><span data-save-state role="status">Изменения ещё не внесены</span></div>`;
+export function saveActions(label = tr('save_changes')) {
+  return `<div class="actions form-actions"><button type="submit">${label}</button><span data-save-state role="status">${tr('no_changes_yet')}</span></div>`;
 }

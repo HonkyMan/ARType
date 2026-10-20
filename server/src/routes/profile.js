@@ -19,7 +19,7 @@ export function installProfile(app, { pool, config }) {
         return productAccess(db, tenant.id, req.user.email);
       });
       tenants.push({
-        id: tenant.id, name: tenant.name, role: tenant.role, status: tenant.status,
+        id: tenant.id, name: tenant.name, plan: tenant.plan, renewal_enabled: tenant.renewal_enabled, role: tenant.role, status: tenant.status,
         languages: tenant.languages, revision: tenant.revision, access_until: tenant.access_until,
         ...entitlement,
       });

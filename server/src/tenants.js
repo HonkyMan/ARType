@@ -84,13 +84,14 @@ export async function tenantDetails(pool, config, user, id) {
 export async function updateTenant(pool, config, user, id, changes) {
   await transaction(pool, async db => {
     const tenant = await access(db, id, user, config, { manage: true, lock: true });
+    if (tenant.plan === 'plus' && tenant.role !== 'operator' && Object.keys(changes).some(key => key !== 'name')) fail(403, 'business_required');
     const entries = Object.entries(changes);
-    if (!entries.length) fail(422, 'empty_update', 'Нет изменений.');
+    if (!entries.length) fail(422, 'empty_update');
     if (tenant.role !== 'operator' && entries.some(([key]) => !['name', 'instructions', 'languages'].includes(key))) {
-      fail(403, 'operator_required', 'Лимиты и подключение меняет оператор сервиса.');
+      fail(403, 'operator_required');
     }
     if (changes.seats && await occupiedSeats(db, id) > changes.seats) {
-      fail(409, 'seats_in_use', 'Сначала отключите лишних участников.');
+      fail(409, 'seats_in_use');
     }
     const assignments = entries.map(([key], index) => `${key}=$${index + 2}`);
     await db.query(`UPDATE tenants SET ${assignments.join(',')},revision=revision+1 WHERE id=$1`, [
@@ -103,20 +104,22 @@ export async function updateTenant(pool, config, user, id, changes) {
 export async function inviteMember(pool, config, user, tenantId, body) {
   await transaction(pool, async db => {
     const tenant = await access(db, tenantId, user, config, { manage: true, lock: true });
+    if (tenant.plan === 'plus') fail(403, 'business_required');
     if (tenant.role === 'admin' && body.role !== 'member') {
-      fail(403, 'owner_required', 'Назначать администраторов может владелец.');
+      fail(403, 'owner_required');
     }
     const result = await db.query('SELECT * FROM memberships WHERE tenant_id=$1 AND email=$2', [tenantId, body.email]);
     const existing = result.rows[0];
     if (tenant.role === 'admin' && existing && existing.role !== 'member') {
-      fail(403, 'owner_required', 'Администратор организации может управлять только участниками.');
+      fail(403, 'owner_required');
     }
     if (existing && (existing.role !== 'owner' || existing.product_enabled)) {
-      fail(409, 'already_member', 'Email уже добавлен. Измените существующего участника.');
+      fail(409, 'already_member');
     }
     const productEnabled = existing ? true : body.role !== 'owner';
+    if (productEnabled && !tenant.renewal_enabled) fail(409, 'renewal_paused');
     if (productEnabled && await occupiedSeats(db, tenantId) >= tenant.seats) {
-      fail(409, 'seats_full', 'Все места заняты.');
+      fail(409, 'seats_full');
     }
     if (existing) {
       // Buying a product seat does not replace an owner's management role.
@@ -133,16 +136,18 @@ export async function inviteMember(pool, config, user, tenantId, body) {
 }
 
 export async function updateMember(pool, config, user, tenantId, memberId, changes) {
-  if (!Object.keys(changes).length) fail(422, 'empty_update', 'Нет изменений.');
+  if (!Object.keys(changes).length) fail(422, 'empty_update');
   await transaction(pool, async db => {
     const tenant = await access(db, tenantId, user, config, { manage: true, lock: true });
+    if (tenant.plan === 'plus') fail(403, 'business_required');
     const result = await db.query('SELECT * FROM memberships WHERE id=$1 AND tenant_id=$2', [memberId, tenantId]);
     const member = result.rows[0];
-    if (!member) fail(404, 'member_missing', 'Участник не найден.');
+    if (!member) fail(404, 'member_missing');
     if (tenant.role === 'admin' && (member.role !== 'member' || (changes.role && changes.role !== 'member'))) {
-      fail(403, 'owner_required', 'Требуются права владельца.');
+      fail(403, 'owner_required');
     }
     const next = { ...member, ...changes };
+    if (next.product_enabled && next.status !== 'disabled' && (!member.product_enabled || member.status === 'disabled') && !tenant.renewal_enabled) fail(409, 'renewal_paused');
     const removesOwner = member.role === 'owner' && member.status !== 'disabled' &&
       (next.role !== 'owner' || next.status === 'disabled');
     if (removesOwner) {
@@ -151,13 +156,13 @@ export async function updateMember(pool, config, user, tenantId, memberId, chang
         WHERE tenant_id=$1 AND id!=$2 AND role='owner' AND status='active'
       `, [tenantId, memberId]);
       if (!otherOwners.rowCount) {
-        fail(409, 'last_owner', 'Сначала назначьте другого владельца и дождитесь его входа.');
+        fail(409, 'last_owner');
       }
     }
     const wasSeated = member.product_enabled && membershipEnabled(member);
     if (!wasSeated && next.product_enabled && next.status !== 'disabled' &&
         await occupiedSeats(db, tenantId) >= tenant.seats) {
-      fail(409, 'seats_full', 'Все места заняты.');
+      fail(409, 'seats_full');
     }
     await db.query(`
       UPDATE memberships SET role=$1,status=$2,product_enabled=$3,expires_at=now()+interval '7 days'

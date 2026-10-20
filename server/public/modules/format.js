@@ -1,36 +1,37 @@
+import {t as tr, intlLocale} from './i18n.js';
 const htmlEntities = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
-const dollars = new Intl.NumberFormat('ru-RU', {style: 'currency', currency: 'USD'});
+
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, character => htmlEntities[character]);
-export const fmt = value => Number(value || 0).toLocaleString('ru-RU');
-export const money = value => dollars.format(Number(value || 0) / 100);
+export const fmt = value => Number(value || 0).toLocaleString(intlLocale());
+export const money = value => new Intl.NumberFormat(intlLocale(), {style:'currency',currency:'USD'}).format(Number(value || 0) / 100);
 
 export function cents(value) {
   const text = String(value).trim().replace(',', '.');
   if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
-    throw new Error('Введите сумму с точностью до цента.');
+    throw new Error(tr('enter_an_amount_with_no_more_than_two_decimal_places'));
   }
   const [whole, fraction = ''] = text.split('.');
   const result = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
   if (!Number.isSafeInteger(result) || result > 9000000000000) {
-    throw new Error('Слишком большая сумма.');
+    throw new Error(tr('the_amount_is_too_large'));
   }
   return result;
 }
 
 export const roles = {
-  owner: 'Владелец организации', admin: 'Администратор организации',
-  member: 'Участник', operator: 'Администратор платформы',
+  get owner() {return tr('workspace_owner');}, get admin() {return tr('workspace_administrator');},
+  get member() {return tr('member');}, get operator() {return tr('platform_administrator');},
 };
 export const statuses = {
-  active: 'Активен', suspended: 'Приостановлен', invited: 'Приглашён', disabled: 'Отключён',
-  success: 'Готово', failed: 'Ошибка', pending: 'В процессе',
+  get active() {return tr('active');}, get suspended() {return tr('suspended');}, get invited() {return tr('invited');}, get disabled() {return tr('disabled');},
+  get success() {return tr('done');}, get failed() {return tr('failed');}, get pending() {return tr('pending');},
 };
 export const languages = {
-  ru: 'Русский', en: 'Английский · English', bn: 'Бенгальский · বাংলা',
-  hi: 'Хинди · हिन्दी', zh: 'Китайский · 中文', es: 'Испанский · Español',
-  fr: 'Французский · Français', ar: 'Арабский · العربية',
-  pt: 'Португальский · Português', id: 'Индонезийский · Indonesia',
+  get ru() {return tr('russian');}, get en() {return tr('english');}, get bn() {return tr('bengali');},
+  get hi() {return tr('hindi');}, get zh() {return tr('chinese');}, get es() {return tr('spanish_espa_ol');},
+  get fr() {return tr('french_fran_ais');}, get ar() {return tr('arabic');},
+  get pt() {return tr('portuguese_portugu_s');}, get id() {return tr('indonesian_indonesia');},
 };
 export const brand = '<a class="brand" href="/"><img src="/assets/artype-mark.svg" alt="">ARType</a>';
 export const button = (text, action, classes = '') =>

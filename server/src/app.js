@@ -1,4 +1,6 @@
 import express from 'express';
+import {errorText, requestLocale} from './localization.js';
+import { installPublicPlans, installWorkspaces } from './routes/workspaces.js';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { installAuth } from './auth.js';
@@ -25,7 +27,9 @@ export function createApp({ pool, config, google, translate }) {
   });
 
   const auth = installAuth(app, { pool, config, google, validate, z });
+  installPublicPlans(app, {pool});
   app.use('/api', auth);
+  installWorkspaces(app, {pool, config});
   installAdministration(app, { pool, config, validate, email });
   installDownloads(app, { config, auth });
   installBilling(app, { pool, config });
@@ -35,7 +39,7 @@ export function createApp({ pool, config, google, translate }) {
   installTranslation(app, { pool, config, translate });
 
   app.use(express.static(fileURLToPath(new URL('../public', import.meta.url)), { etag: false, maxAge: 0 }));
-  app.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Страница не найдена.' } }));
+  app.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: errorText('not_found',requestLocale(req)) } }));
   app.use(handleError);
   return app;
 }

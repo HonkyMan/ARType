@@ -1,4 +1,6 @@
-import {test} from 'node:test';
+import {test,beforeEach} from 'node:test';
+import {setLocale} from '../public/modules/i18n.js';
+beforeEach(()=>setLocale('ru', {setItem(){}}));
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createConsole} from '../public/modules/console.js';
@@ -43,7 +45,7 @@ function browserFixture(storage = browserStorage(), hash = '') {
     innerHTML: '', addEventListener(name, handler) { listeners[name] = handler; },
     querySelector() { return null; },
   };
-  const message = {textContent: '', hidden: true};
+  const message = {textContent: '', hidden: true, querySelector() {return {textContent:''};}};
   const pending = [];
   const location = {search: '', hash, origin: 'https://artype.test'};
   const document = {querySelector(selector) { return selector === '#app' ? root : message; }};
@@ -85,6 +87,7 @@ function browserFixture(storage = browserStorage(), hash = '') {
   const signIn = async (profile = memberProfile) => {
     await settle(next('/api/me'), profile);
     if (profile.operator && location.hash === '#dashboard') await settle(next('/api/dashboard'), dashboard);
+    if (!profile.operator && !profile.tenants.length && location.hash === '#new-workspace') await settle(next('/api/plans'), {plans:[{plan:'plus',price_cents:500,seat_price_cents:0,registration_enabled:true},{plan:'business',price_cents:1000,seat_price_cents:500,registration_enabled:true}]});
     await ready;
   };
   const click = dataset => listeners.click({target: {closest: selector => selector === 'button' ? {dataset, isConnected: false} : null}});
@@ -250,6 +253,7 @@ test('opening tenant from dashboard loads actual connection options before rende
 });
 
 const wallet = {
+  base_price_cents:1000,subscription_paid:true,renewal_enabled:true,orders:[],
   balance_cents: 10000, unit_price_cents: 500, currency: 'USD', period: '2026-10-01',
   pending_seats: 0, required_cents: 0, missing_cents: 0, entries: [],
 };
@@ -692,18 +696,18 @@ test('pricing lives outside the overview and remains restricted to platform admi
   await app.settle(app.next('/api/billing-settings'), {unit_price_cents: 500});
   await open;
   assert.equal(app.location.hash, '#pricing');
-  const save = app.submit(app.form('price', {price: '6.25'}));
+  const save = app.submit(app.form('price', {price: '6.25',plus_price:'5',business_price:'10'}));
   const request = app.next('/api/billing-settings');
   assert.equal(request.options.method, 'PUT');
-  assert.deepEqual(JSON.parse(request.options.body), {unit_price_cents: 625});
+  assert.deepEqual(JSON.parse(request.options.body), {unit_price_cents:625,plus_price_cents:500,business_price_cents:1000});
   await app.settle(request, {ok: true});
-  await app.settle(app.next('/api/billing-settings'), {unit_price_cents: 625});
+  await app.settle(app.next('/api/billing-settings'), {unit_price_cents:625,plus_price_cents:500,business_price_cents:1000});
   await save;
   assert.match(app.root.innerHTML, /value="6.25"/);
 
   const owner = browserFixture(browserStorage(), '#pricing');
   await owner.signIn(memberProfile);
-  assert.equal(owner.location.hash, '#home');
+  assert.equal(owner.location.hash, '#new-workspace');
   assert.equal(owner.pending.some(r => r.path === '/api/billing-settings'), false);
   assert.doesNotMatch(owner.root.innerHTML, /data-action="pricing"/);
 });
@@ -823,4 +827,23 @@ test('dirty navigation keeps its trigger focusable and restores focus after canc
   await click;
   assert.equal(app.document.activeElement, trigger);
   assert.equal(app.pending.some(request => request.path === '/api/downloads'), false);
+});
+
+test('a new desktop user creates a workspace before approving the device and resumes the pairing flow', async () => {
+  const app=browserFixture();app.location.search='?device=device-1';
+  await app.signIn();
+  assert.equal(app.location.hash,'#new-workspace');
+  assert.equal(app.pending.some(r=>r.path==='/api/device/device-1'),false);
+  const form=app.form('workspace',{plan:'plus',name:'Personal'});
+  const save=app.submit(form);
+  const request=app.next('/api/workspaces');
+  assert.match(JSON.parse(request.options.body).idempotency_key,/^[a-f0-9-]{36}$/);
+  await app.settle(request,{id:'A'});
+  const profile={...memberProfile,tenants:[{id:'A',name:'Personal',plan:'plus',role:'owner'}]};
+  await app.settle(app.next('/api/me'),profile);
+  await app.settle(app.next('/api/me'),profile);
+  await app.settle(app.next('/api/device/device-1'),{code:'123456'});
+  await save;
+  assert.match(app.root.innerHTML,/123456/);
+  assert.match(app.root.innerHTML,/data-approve="device-1"/);
 });

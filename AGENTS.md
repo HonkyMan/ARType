@@ -8,7 +8,7 @@ are documented in `docs/ARCHIVE.md`; they do not define the current product.
 ## Boundaries
 
 - `server/src/app.js` composes HTTP routes. Domain services own authorization,
-  transactions and billing; `database.js` and versioned migrations stay independent
+  transactions and billing; `database.js` and the fresh schema initializer stay independent
   of business services. Keep imports acyclic.
 - `server/public/modules` separates session/API, navigation, actions and views.
   Escape untrusted values; late responses cannot restore an old tenant or session.

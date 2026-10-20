@@ -34,6 +34,7 @@ async function fixture(run) {
     'docs/OPERATIONS.md': 'Fixture operations\n', 'docs/ACCEPTANCE.md': 'Fixture acceptance\n',
     'docs/ARCHITECTURE.md': 'Fixture architecture\n', 'docs/ARCHIVE.md': 'Historical content\n',
     'docs/ROLES.md': 'Roles and permissions\n',
+    'docs/WORKSPACES.md': 'Workspaces and payments\n',
     'deployment/setup.sh': '#!/bin/sh\n', 'deployment/configure.mjs': '// fixture\n',
     'deployment/backup.sh': '#!/bin/sh\n', 'deployment/restore.sh': '#!/bin/sh\n',
     'deployment/Caddyfile': '# fixture\n', 'deployment/publish-downloads.mjs': '// fixture\n',

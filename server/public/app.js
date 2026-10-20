@@ -1,5 +1,8 @@
+import {getLocale, t} from './modules/i18n.js';
 import {createConsole} from './modules/console.js';
 
+document.documentElement.lang = getLocale();
+document.querySelector('#app').textContent = t('connecting_workspace');
 const application = createConsole({
   document,
   fetch: (...arguments_) => window.fetch(...arguments_),

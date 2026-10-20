@@ -30,23 +30,21 @@ export async function credentialList(client, config) {
 export async function saveConnection(pool, config, user, alias, changes, { createOnly = false } = {}) {
   requirePlatformAdmin(user, config);
   if (!config.credentialEncryptionKey) {
-    fail(503, 'encryption_not_configured', 'Нужно задать CREDENTIAL_ENCRYPTION_KEY в конфигурации сервера и пересоздать API.');
+    fail(503, 'encryption_not_configured');
   }
   await transaction(pool, async db => {
     await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['provider:' + alias]);
     const result = await db.query('SELECT * FROM provider_credentials WHERE alias=$1', [alias]);
     const existing = result.rows[0];
     if (createOnly && (existing || config.providerKeys[alias])) {
-      fail(409, 'connection_exists', 'Подключение с таким названием уже существует. Откройте его для редактирования или выберите другое название.');
+      fail(409, 'connection_exists');
     }
-    // Existing v4 URLs were stored without canonical host/default-port spelling.
-    // Normalize for equality without revalidating the old destination, so an
-    // administrator can still repair a formerly accepted URL with a fresh key.
+    // Compare canonical destinations so spelling alone does not rotate a key.
     const previousURL = new URL(existing?.base_url || config.providerBaseURL).href.replace(/\/+$/, '');
     const missingKey = !existing && !config.providerKeys[alias];
     const destinationChanged = changes.base_url && changes.base_url !== previousURL;
     if (!changes.key && (missingKey || destinationChanged)) {
-      fail(422, 'provider_key_required', 'Для нового подключения или смены адреса введите API-ключ заново.');
+      fail(422, 'provider_key_required');
     }
     const ciphertext = changes.key
       ? encryptCredential(changes.key, config.credentialEncryptionKey, alias)

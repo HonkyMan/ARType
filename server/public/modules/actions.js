@@ -1,3 +1,4 @@
+import {t as tr, getLocale, setLocale, intlLocale} from './i18n.js';
 import {StaleResponse} from './api.js';
 import {cents, money} from './format.js';
 import {submitBalance} from './balance.js';
@@ -18,16 +19,17 @@ export function installActions({
 
   root.addEventListener('input', event => {
     const input = event.target;
+    input.setCustomValidity?.('');
     if (input.matches?.('[data-filter]')) {
       const scope = input.closest('.panel');
-      const query = input.value.trim().toLocaleLowerCase('ru-RU');
+      const query = input.value.trim().toLocaleLowerCase(intlLocale());
       const rows = [...scope.querySelectorAll('[data-filter-item]')];
       let visible = 0;
       for (const row of rows) {
-        row.hidden = !row.dataset.search.toLocaleLowerCase('ru-RU').includes(query);
+        row.hidden = !row.dataset.search.toLocaleLowerCase(intlLocale()).includes(query);
         if (!row.hidden) visible += 1;
       }
-      scope.querySelector('[data-filter-count]').textContent = query ? `Найдено: ${visible} из ${rows.length}` : '';
+      scope.querySelector('[data-filter-count]').textContent = query ? tr('search_result_count',{visible,total:rows.length}) : '';
       scope.querySelector('[data-no-matches]').hidden = !query || visible > 0;
       return;
     }
@@ -36,10 +38,10 @@ export function installActions({
 
   function markDirty(input) {
     const form = input.closest?.('form[data-form]');
-    if (!form || form.dataset.form === 'invoice') return;
+    if (!form) return;
     form.dataset.dirty = 'true';
     const status = form.querySelector('[data-save-state]');
-    if (status) status.textContent = 'Есть несохранённые изменения';
+    if (status) status.textContent = tr('you_have_unsaved_changes');
   }
 
   root.addEventListener('click', async event => {
@@ -61,7 +63,7 @@ export function installActions({
     const ticket = state.snapshot();
     try {
       if (data.tenant) {
-        await navigation.openTenant(data.tenant, 'team');
+        await navigation.openTenant(data.tenant, data.section || 'team');
       } else if (data.editProvider) {
         await navigation.providerEditorPage(data.editProvider);
       } else if (data.productMember) {
@@ -69,21 +71,21 @@ export function installActions({
           product_enabled: data.product === 'true',
         });
         await reloadTenant(data.memberTenant, ticket);
-        views.toast('Доступ к программе обновлён');
+        views.toast(tr('app_access_updated'));
       } else if (data.removeAdmin) {
         await api.request('/api/platform-admins/' + encodeURIComponent(data.removeAdmin), 'DELETE');
         if (state.isCurrent(ticket)) await navigation.adminsPage();
-        views.toast('Права администратора отозваны');
+        views.toast(tr('administrator_access_revoked'));
       } else if (data.member) {
         await api.request(`/api/tenants/${data.memberTenant}/members/${data.member}`, 'PATCH', {status: data.status});
         await reloadTenant(data.memberTenant, ticket);
-        views.toast('Доступ обновлён');
+        views.toast(tr('access_updated'));
       } else if (data.approve) {
         await api.request(`/api/device/${encodeURIComponent(data.approve)}/approve`, 'POST', {code: data.code});
         if (state.isCurrent(ticket)) {
           views.shell(
-            '<div class="notice">Приложение подключено. Вернитесь в ARType; эту вкладку можно закрыть.</div>',
-            'Готово', 'Вход в приложение подтверждён.',
+            `<div class="notice">${tr('app_connected_return_to_artype_you_can_close_this_tab')}</div>`,
+            tr('done'), tr('app_sign_in_confirmed'),
           );
           history.replaceState({}, '', '/');
         }
@@ -112,7 +114,7 @@ export function installActions({
       case 'login': {
         const status = await api.request('/auth/status');
         if (!state.isCurrent(ticket)) return;
-        if (!status.configured) throw new Error('Google-вход ещё не настроен. Обратитесь к администратору сервиса.');
+        if (!status.configured) throw new Error(tr('google_sign_in_is_not_configured_yet_contact_the_platform_admini'));
         location.href = '/auth/google' + (location.search || '');
         return;
       }
@@ -122,7 +124,7 @@ export function installActions({
           await api.logout();
         } catch (error) {
           if (!(error instanceof StaleResponse)) {
-            views.showError(new Error('Кабинет закрыт. Сервер не подтвердил выход; обновите страницу и повторите выход.'));
+            views.showError(new Error(tr('the_console_is_closed_but_the_server_did_not_confirm_sign_out_re')));
           }
         }
         return;
@@ -146,14 +148,15 @@ export function installActions({
       case 'refresh': return navigation.start();
       case 'admins': return navigation.adminsPage();
       case 'help': return navigation.helpPage();
+      case 'new-workspace': return navigation.workspacePage();
       case 'new-tenant': return navigation.newTenantPage();
       case 'copy-url':
         await navigator.clipboard.writeText(location.origin);
-        if (state.isCurrent(ticket)) views.toast('Адрес скопирован');
+        if (state.isCurrent(ticket)) views.toast(tr('address_copied'));
         return;
       case 'copy-invoice':
         await navigator.clipboard.writeText(root.querySelector('[data-invoice-text]').textContent.trim());
-        if (state.isCurrent(ticket)) views.toast('Запрос на инвойс скопирован');
+        if (state.isCurrent(ticket)) views.toast(tr('invoice_request_copied'));
         return;
       default:
         if (action?.startsWith('section:') && state.details) {
@@ -166,6 +169,14 @@ export function installActions({
   }
 
   root.addEventListener('change', async event => {
+    if (event.target.matches?.('[data-locale]')) {
+      const language = event.target.value;
+      if (views.hasUnsavedChanges() && !await views.confirmDiscard()) {event.target.value=getLocale();return;}
+      const persisted = setLocale(language);
+      if (state.me) await navigation.start(); else views.login();
+      if (!persisted) views.toast(tr('locale_not_persisted'));
+      return;
+    }
     markDirty(event.target);
     if (event.target.name === 'credential') {
       const connection = state.connections.find(item => item.alias === event.target.value);
@@ -183,7 +194,7 @@ export function installActions({
     try {
       await api.request(`/api/tenants/${tenant}/members/${member}`, 'PATCH', {role: event.target.value});
       await reloadTenant(tenant, ticket);
-      views.toast('Роль обновлена');
+      views.toast(tr('role_updated'));
     } catch (error) {
       report(error, ticket);
       if (state.me && state.isCurrent(ticket)) {
@@ -203,7 +214,7 @@ export function installActions({
     form.dataset.submitting = 'true';
     submit.disabled = true;
     const originalLabel = submit.textContent;
-    submit.textContent = 'Сохраняем…';
+    submit.textContent = tr('saving');
     const oldError = form.querySelector('[data-form-error]');
     if (oldError) oldError.remove();
     try {
@@ -214,7 +225,7 @@ export function installActions({
       }
       if (form.querySelector('[data-languages]')) {
         values.languages = formData.getAll('languages');
-        if (!values.languages.length) throw new Error('Выберите хотя бы один язык перевода.');
+        if (!values.languages.length) throw new Error(tr('select_at_least_one_translation_language'));
       }
       if ('access_until' in values) values.access_until = values.access_until ? new Date(values.access_until).toISOString() : null;
       form.inert = true;
@@ -243,11 +254,42 @@ export function installActions({
 
   async function submitForm(form, values, tenant, ticket) {
     switch (form.dataset.form) {
-      case 'price':
-        await api.request('/api/billing-settings', 'PUT', {unit_price_cents: cents(values.price)});
+      case 'workspace': {
+        form.dataset.requestKey ||= crypto.randomUUID();
+        const result = await api.request('/api/workspaces', 'POST', {...values,idempotency_key:form.dataset.requestKey});
+        delete form.dataset.dirty;
+        if (state.isCurrent(ticket)) {
+          const profile = await api.request('/api/me');
+          if (state.isCurrent(ticket)) {
+            state.me=profile;
+            if (new URLSearchParams(location.search).has('device')) await navigation.start();
+            else await navigation.openTenant(result.id,'billing');
+          }
+        }
+        return;
+      }
+      case 'plan-defaults':
+        await api.request('/api/plan-defaults/'+form.dataset.plan,'PUT',{...values,registration_enabled:values.registration_enabled === 'true'});
         delete form.dataset.dirty;
         if (state.isCurrent(ticket)) await navigation.pricingPage();
-        views.toast('Стоимость места сохранена');
+        views.toast(tr('registration_settings_saved'));
+        return;
+      case 'renewal':
+        await api.request(`/api/tenants/${tenant}/renewal`,'PUT',{enabled:values.enabled === 'true'});
+        delete form.dataset.dirty;
+        await reloadTenant(tenant,ticket);
+        return;
+      case 'settle-payment':
+        await api.request(`/api/payment-orders/${form.dataset.orderId}/settle`,'POST',{amount_cents:cents(values.amount),currency:'USD',reference:values.reference});
+        delete form.dataset.dirty;
+        await reloadTenant(tenant,ticket);
+        views.toast(tr('payment_confirmed_and_credited_to_the_balance'));
+        return;
+      case 'price':
+        await api.request('/api/billing-settings', 'PUT', {unit_price_cents:cents(values.price),plus_price_cents:cents(values.plus_price),business_price_cents:cents(values.business_price)});
+        delete form.dataset.dirty;
+        if (state.isCurrent(ticket)) await navigation.pricingPage();
+        views.toast(tr('subscription_prices_saved'));
         return;
       case 'balance': {
         const operation = await submitBalance({
@@ -259,14 +301,15 @@ export function installActions({
         await reloadTenant(tenant, ticket);
         balanceJournal.complete(operation);
         if (state.current === tenant && state.details) views.renderTenant();
-        views.toast('Операция записана');
+        views.toast(tr('transaction_recorded'));
         return;
       }
       case 'invoice': {
-        const wallet = state.details.billing;
-        form.querySelector('[data-invoice-text]').textContent =
-          `Запрос на инвойс: ${state.details.tenant.name}; количество мест: ${values.quantity}; ${values.quantity} × ${money(wallet.unit_price_cents)} = ${money(Number(values.quantity) * wallet.unit_price_cents)}. После оплаты администратор начислит сумму на баланс организации.`;
-        form.querySelector('[data-action="copy-invoice"]').hidden = false;
+        form.dataset.requestKey ||= crypto.randomUUID();
+        await api.request(`/api/tenants/${tenant}/payment-orders`,'POST',{amount_cents:cents(values.amount),idempotency_key:form.dataset.requestKey});
+        delete form.dataset.dirty;
+        await reloadTenant(tenant,ticket);
+        views.toast(tr('request_saved_the_administrator_can_find_it_in_the_payments_sect'));
         return;
       }
       case 'provider': {
@@ -276,7 +319,7 @@ export function installActions({
         delete form.dataset.dirty;
         form.reset();
         if (state.isCurrent(ticket)) await navigation.providerPage();
-        views.toast('Подключение сохранено');
+        views.toast(tr('connection_saved'));
         return;
       }
       case 'admin':
@@ -284,26 +327,26 @@ export function installActions({
         delete form.dataset.dirty;
         form.reset();
         if (state.isCurrent(ticket)) await navigation.adminsPage();
-        views.toast('Администратор платформы добавлен');
+        views.toast(tr('platform_administrator_added'));
         return;
       case 'create': {
         await api.request('/api/tenants', 'POST', values);
         delete form.dataset.dirty;
         if (state.isCurrent(ticket)) await navigation.home();
-        views.toast('Организация создана. Передайте владельцу адрес кабинета.');
+        views.toast(tr('organization_created_share_the_console_address_with_its_owner'));
         return;
       }
       case 'invite':
         await api.request(`/api/tenants/${tenant}/members`, 'POST', values);
         delete form.dataset.dirty;
         await reloadTenant(tenant, ticket);
-        views.toast('Сотрудник добавлен. Проверьте статус оплаты и передайте ему адрес кабинета и установщик.');
+        views.toast(tr('employee_added_check_payment_status_and_share_the_console_addres'));
         return;
       case 'settings':
         await api.request(`/api/tenants/${tenant}`, 'PATCH', values);
         delete form.dataset.dirty;
         await reloadTenant(tenant, ticket);
-        views.toast('Правила сохранены');
+        views.toast(tr('settings_saved'));
     }
   }
 }

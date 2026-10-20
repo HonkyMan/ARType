@@ -1,3 +1,4 @@
+import {errorText, requestLocale} from './localization.js';
 import { hash } from './auth.js';
 import { uuid } from './schemas.js';
 import { HttpError } from './errors.js';
@@ -45,7 +46,7 @@ export function pairingThrottle(pool) {
       }
       throttle.set(key, { n: 1, until: now + 60000 });
     } else if (++entry.n > limit) {
-      return res.status(429).json({ error: { code: 'rate_limit', message: 'Подождите минуту и повторите вход.' } });
+      return res.status(429).json({ error: { code: 'rate_limit', message: errorText('rate_limit',requestLocale(req)) } });
     }
     next();
   };
@@ -59,9 +60,14 @@ export function handleError(error, req, res, next) {
     // Do not log upstream bodies, submitted text, cookies or credentials.
     console.error(JSON.stringify({ event: 'request_error', code: error.code || 'internal', path: req.route?.path || 'unknown' }));
   }
-  res.status(status).json({ error: {
-    code: error instanceof HttpError ? error.code : 'request_failed',
-    message: error instanceof HttpError ? error.message :
-      status === 500 ? 'Ошибка сервера. Повторите позже.' : 'Некорректный запрос.',
-  } });
+  const code = error instanceof HttpError ? error.code : status === 500 ? 'internal' : 'request_failed';
+  const locale = requestLocale(req);
+  const message = errorText(code,locale,error.params);
+  res.set('Content-Language',locale);
+  if (req.path.startsWith('/auth/')) {
+    const escape = text => text.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const back = locale === 'ru' ? 'Вернуться ко входу' : 'Back to sign in';
+    return res.status(status).type('html').send(`<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ARType</title><link rel="stylesheet" href="/style.css"><main class="workspace"><h1>ARType</h1><div class="error" role="alert">${escape(message)}</div><a class="button" href="/">${back}</a></main></html>`);
+  }
+  res.status(status).json({error:{code,message,params:error.params || {}}});
 }

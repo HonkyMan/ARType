@@ -27,7 +27,7 @@ export function installTranslation(app, { pool, config, translate }) {
       if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('Empty response');
     } catch {
       await pool.query("UPDATE usage SET status='failed',duration_ms=$1 WHERE id=$2", [Date.now() - start, reserved.id]);
-      fail(502, 'provider_unavailable', 'Не удалось выполнить перевод. Исходный текст сохранён. Повторите позже.');
+      fail(502, 'provider_unavailable');
     }
     await pool.query(`
       UPDATE usage SET status='success',input_tokens=$1,output_tokens=$2,duration_ms=$3 WHERE id=$4

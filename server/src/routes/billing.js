@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import {planConfiguration} from '../workspaces.js';
 import { requirePlatformAdmin } from '../access.js';
 import { validate, uuid } from '../schemas.js';
 import { billingSettings } from '../billing.js';
 import { updateUnitPrice, tenantWallet, adjustBalance, dashboard } from '../wallets.js';
 
-const pricing = z.object({ unit_price_cents: z.number().int().min(0).max(100000000) }).strict();
+const price = z.number().int().min(0).max(100000000);
+const pricing = z.object({unit_price_cents: price, plus_price_cents: price, business_price_cents: price}).strict();
 const adjustment = z.object({
   operation: z.enum(['credit', 'set']),
   amount_cents: z.number().int().min(0).max(9000000000000),
@@ -15,12 +17,12 @@ const adjustment = z.object({
 export function installBilling(app, { pool, config }) {
   app.get('/api/billing-settings', async (req, res) => {
     requirePlatformAdmin(req.user, config);
-    res.json(await billingSettings(pool));
+    res.json({...await billingSettings(pool), ...await planConfiguration(pool, config, req.user)});
   });
   app.put('/api/billing-settings', async (req, res) => {
     requirePlatformAdmin(req.user, config);
     const body = validate(pricing, req.body);
-    await updateUnitPrice(pool, config, req.user, body.unit_price_cents);
+    await updateUnitPrice(pool, config, req.user, body);
     res.json({ ok: true });
   });
   app.get('/api/tenants/:id/balance', async (req, res) => {

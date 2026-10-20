@@ -33,11 +33,11 @@ export function createDeviceService({pool, config, validate, z}) {
         'SELECT * FROM devices WHERE id=$1 FOR UPDATE', [input.id],
       )).rows[0];
       if (!device || device.consumed || new Date(device.expires_at) <= new Date()) {
-        fail(410, 'device_expired', 'Вход истёк. Начните снова.');
+        fail(410, 'device_expired');
       }
       if (!sameSecret(device.poll_hash, hash(input.poll_token)) ||
           !sameSecret(device.challenge, hash(input.verifier))) {
-        fail(403, 'device_secret', 'Неверное подтверждение устройства.');
+        fail(403, 'device_secret');
       }
       if (!device.user_id) return null;
       // Consumption and token issuance commit together while the grant is locked.
@@ -51,7 +51,7 @@ export function createDeviceService({pool, config, validate, z}) {
     const device = (await pool.query(
       'SELECT code FROM devices WHERE id=$1 AND expires_at>now() AND NOT consumed', [id],
     )).rows[0];
-    if (!device) fail(410, 'device_expired', 'Вход устарел.');
+    if (!device) fail(410, 'device_expired');
     return device;
   }
 
@@ -63,7 +63,7 @@ export function createDeviceService({pool, config, validate, z}) {
       WHERE id=$2 AND code=$3 AND expires_at>now() AND user_id IS NULL AND NOT consumed
     `, [userId, id, code]);
     if (!result.rowCount) {
-      fail(403, 'device_code', 'Код не совпадает или запрос уже подтверждён.');
+      fail(403, 'device_code');
     }
   }
 

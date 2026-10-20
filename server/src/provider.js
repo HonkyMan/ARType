@@ -65,7 +65,7 @@ export function makeTranslator(config) {
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new HttpError(502, 'provider_unavailable', 'Провайдер перевода недоступен. Повторите позже.');
+      throw new HttpError(502, 'provider_unavailable');
     }
     const data = await readResponse(response);
     const choice = data.choices?.[0];

@@ -31,5 +31,5 @@ test('restore aborts if API could not be stopped',t=>{
 });
 test('local restore stops and resumes only the running API around pg_restore',t=>{
   const {result,trace}=runRestore(t);assert.equal(result.status,0,result.stderr);
-  assert.deepEqual(trace.trim().split('\n'),['compose ps --services --filter status=running','compose stop api','compose exec -T db pg_restore -U artype -d artype --clean --if-exists --no-owner --single-transaction','compose up -d api']);
+  assert.deepEqual(trace.trim().split('\n'),['compose ps --services --filter status=running','compose stop api','compose exec -T db sh -c exec pg_restore -U artype --dbname="$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction','compose up -d api']);
 });

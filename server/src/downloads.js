@@ -26,7 +26,7 @@ async function publishedFiles(config) {
   try {
     files = manifestSchema.parse(JSON.parse(content)).files;
   } catch {
-    fail(503, 'downloads_unavailable', 'Список установщиков повреждён. Обратитесь к администратору платформы.');
+    fail(503, 'downloads_unavailable');
   }
   return files.map(file => ({ ...file, url: '/downloads/' + file.filename }));
 }
@@ -35,19 +35,19 @@ export function installDownloads(app, { config, auth }) {
   app.get('/api/downloads', async (req, res) => res.json({ files: await publishedFiles(config) }));
   app.get('/downloads/:filename', auth, async (req, res) => {
     const file = (await publishedFiles(config)).find(candidate => candidate.filename === req.params.filename);
-    if (!file) fail(404, 'download_missing', 'Установщик не опубликован.');
+    if (!file) fail(404, 'download_missing');
     const root = await realpath(config.downloadDirectory);
     let path;
     try {
       path = await realpath(resolve(root, file.filename));
     } catch (error) {
-      if (error.code === 'ENOENT') fail(404, 'download_missing', 'Файл установщика отсутствует.');
+      if (error.code === 'ENOENT') fail(404, 'download_missing');
       throw error;
     }
-    if (!path.startsWith(root + sep)) fail(404, 'download_missing', 'Установщик недоступен.');
+    if (!path.startsWith(root + sep)) fail(404, 'download_missing');
     const info = await stat(path);
     if (!info.isFile() || info.size !== file.size_bytes) {
-      fail(503, 'download_invalid', 'Установщик повреждён. Обратитесь к администратору платформы.');
+      fail(503, 'download_invalid');
     }
     res.download(path, file.filename);
   });

@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { loadConfig } from './config.js';
-import { migrate } from './migrations.js';
+import { initializeSchema } from './schema.js';
 import { createApp } from './app.js';
 import { makeGoogle } from './auth.js';
 import { makeTranslator } from './provider.js';
@@ -8,7 +8,7 @@ import { startMaintenance } from './maintenance.js';
 
 const config = loadConfig();
 const pool = new pg.Pool({ connectionString: config.databaseURL, max: 20, statement_timeout: 10000 });
-await migrate(pool);
+await initializeSchema(pool);
 const server = createApp({
   pool, config, google: makeGoogle(config), translate: makeTranslator(config),
 }).listen(config.port, '0.0.0.0', () => console.log(`ARType listening on ${config.port}`));

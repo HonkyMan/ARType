@@ -7,8 +7,7 @@ import {issueSession} from './auth-session.js';
 export function createOAuthService({pool, config, google, validate, z}) {
   async function start(deviceId) {
     if (!config.googleClientId || !config.googleClientSecret) {
-      fail(503, 'google_not_configured',
-        'Google-вход ещё не настроен. Администратору нужно задать GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET.');
+      fail(503, 'google_not_configured');
     }
     let device = null;
     if (deviceId) {
@@ -17,7 +16,7 @@ export function createOAuthService({pool, config, google, validate, z}) {
         'SELECT id FROM devices WHERE id=$1 AND expires_at>now() AND NOT consumed', [device],
       );
       if (!result.rowCount) {
-        fail(410, 'device_expired', 'Вход устарел. Начните вход в приложении снова.');
+        fail(410, 'device_expired');
       }
     }
 
@@ -35,28 +34,28 @@ export function createOAuthService({pool, config, google, validate, z}) {
   async function consumeState(stateValue, browser) {
     const state = validate(z.string().min(20).max(200), stateValue);
     if (!browser) {
-      fail(400, 'oauth_state', 'Браузерная сессия входа отсутствует. Начните вход снова.');
+      fail(400, 'oauth_state');
     }
     const row = (await pool.query(`
       DELETE FROM oauth_states
       WHERE state_hash=$1 AND cookie_hash=$2 AND expires_at>now() RETURNING *
     `, [hash(state), hash(browser)])).rows[0];
-    if (!row) fail(400, 'oauth_state', 'Ссылка входа истекла или уже использована.');
+    if (!row) fail(400, 'oauth_state');
     return row;
   }
 
   async function complete(row, query) {
-    if (query.error) fail(400, 'oauth_cancelled', 'Вход Google отменён. Начните вход снова.');
+    if (query.error) fail(400, 'oauth_cancelled');
     const code = validate(z.string().min(1).max(4096), query.code);
     let claims;
     try {
       claims = await google.exchange(code, row.verifier);
     } catch {
-      fail(400, 'oauth_failed', 'Не удалось подтвердить вход Google. Начните вход снова.');
+      fail(400, 'oauth_failed');
     }
     if (!claims || !sameSecret(claims.nonce, row.nonce) || claims.email_verified !== true ||
         typeof claims.sub !== 'string' || !claims.sub || typeof claims.email !== 'string') {
-      fail(400, 'oauth_identity', 'Google не подтвердил личность и email.');
+      fail(400, 'oauth_identity');
     }
     const email = validate(z.email().max(254), claims.email.toLowerCase());
 
@@ -69,7 +68,7 @@ export function createOAuthService({pool, config, google, validate, z}) {
         'SELECT id,sub FROM users WHERE email=$1 OR sub=$2 FOR UPDATE', [email, claims.sub],
       )).rows;
       if (existing.some(user => user.sub !== claims.sub)) {
-        fail(403, 'identity_conflict', 'Email связан с другой учётной записью. Обратитесь к администратору.');
+        fail(403, 'identity_conflict');
       }
       const id = existing[0]?.id || uid();
       const user = (await client.query(`

@@ -1,3 +1,4 @@
+import {t as tr} from './i18n.js';
 import {StaleResponse} from './api.js';
 import {esc} from './format.js';
 
@@ -12,7 +13,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
     if (!signedIn()) return null;
     const ticket = state.navigate(section, tenant);
     if (location.hash !== hash) history.pushState({}, '', hash);
-    views.shell('<div class="loading">Загружаем…</div>', title, '');
+    views.shell(`<div class="loading">${tr('loading')}</div>`, title, '');
     return ticket;
   }
 
@@ -27,7 +28,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
 
   async function home(create = false) {
     if (create && !state.me?.operator) create = false;
-    const ticket = begin(create ? 'new-tenant' : 'home', create ? 'Новая организация' : 'Организации', null, create ? '#new-tenant' : '#home');
+    const ticket = begin(create ? 'new-tenant' : 'home', create ? tr('new_organization') : tr('workspaces'), null, create ? '#new-tenant' : '#home');
     if (!ticket) return;
     const data = state.me.operator
       ? await load(ticket, api.request('/api/tenants'))
@@ -41,23 +42,33 @@ export function createNavigation({state, api, views, location, history, balanceJ
     else views.home();
   }
 
+  async function workspacePage() {
+    const ticket = begin('new-workspace', tr('choose_your_workspace'));
+    if (!ticket) return;
+    const data = await load(ticket, api.request('/api/plans'));
+    if (state.isCurrent(ticket)) views.onboarding(data);
+  }
+
   async function dashboardPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('dashboard', 'Обзор платформы');
+    const ticket = begin('dashboard', tr('platform_overview'));
     const data = await load(ticket, api.request('/api/dashboard'));
     if (state.isCurrent(ticket)) views.dashboard(data);
   }
 
   async function pricingPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('pricing', 'Тариф платформы');
+    const ticket = begin('pricing', tr('subscription_pricing'));
     const data = await load(ticket, api.request('/api/billing-settings'));
-    if (state.isCurrent(ticket)) views.pricing(data);
+    if (state.isCurrent(ticket)) {
+      state.connections = data.connections || [];
+      views.pricing(data);
+    }
   }
 
   async function providerPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('provider', 'AI-провайдеры', null, '#providers');
+    const ticket = begin('provider', tr('ai_providers'), null, '#providers');
     const data = await load(ticket, api.request('/api/provider-credentials'));
     if (!state.isCurrent(ticket)) return;
     state.defaultModel = data.default_model || '';
@@ -69,7 +80,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
   async function providerEditorPage(alias = null) {
     if (!state.me?.operator) return home();
     const hash = alias === null ? '#providers/new' : `#providers/${encodeURIComponent(alias)}/edit`;
-    const ticket = begin('provider-edit', alias === null ? 'Новое подключение' : 'Редактирование подключения', null, hash);
+    const ticket = begin('provider-edit', alias === null ? tr('new_connection') : tr('edit_connection'), null, hash);
     const data = await load(ticket, api.request('/api/provider-credentials'));
     if (!state.isCurrent(ticket)) return;
     state.connections = data.credentials;
@@ -78,18 +89,18 @@ export function createNavigation({state, api, views, location, history, balanceJ
 
   async function adminsPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('admins', 'Администраторы платформы');
+    const ticket = begin('admins', tr('platform_administrators'));
     const data = await load(ticket, api.request('/api/platform-admins'));
     if (state.isCurrent(ticket)) views.admins(data);
   }
 
   async function helpPage() {
-    const ticket = begin('help', 'Установка и помощь');
+    const ticket = begin('help', tr('install_and_help'));
     if (!ticket) return;
     const data = await load(ticket, api.request('/api/downloads'));
     if (!state.isCurrent(ticket)) return;
     state.downloadFiles = data.files;
-    views.shell(views.helpContent(), 'Установка и помощь', 'Установщики и инструкции для вашей команды.');
+    views.shell(views.helpContent(), tr('install_and_help'), tr('installers_and_instructions_for_getting_started'));
   }
 
   async function openTenant(id, section = state.section) {
@@ -97,15 +108,16 @@ export function createNavigation({state, api, views, location, history, balanceJ
     const tenant = state.me.tenants.find(item => item.id === id);
     if (!tenant && !state.me.operator) return home();
     if (!['team', 'translation', 'settings', 'usage', 'billing'].includes(section)) section = 'team';
-    const ticket = begin(section, 'Рабочее пространство', id, `#tenants/${encodeURIComponent(id)}/${section}`);
+    if (tenant?.plan === 'plus' && (!state.me.operator || ['team','translation'].includes(section))) section = 'billing';
+    const ticket = begin(section, tr('workspace'), id, `#tenants/${encodeURIComponent(id)}/${section}`);
     if (tenant?.role === 'member') {
       const data = await load(ticket, api.request('/api/downloads'));
       if (!state.isCurrent(ticket)) return;
       state.downloadFiles = data.files;
       views.shell(
-        `<div class="notice">Вы подключены к организации. Участниками и правилами управляет её администратор.</div>${views.helpContent()}`,
+        `<div class="notice">${tr('you_have_joined_this_workspace_its_administrator_manages_members')}</div>${views.helpContent()}`,
         tenant.name,
-        'Войдите в приложение с этим же Google-аккаунтом.',
+        tr('sign_in_to_the_app_with_the_same_google_account'),
       );
       return;
     }
@@ -137,14 +149,14 @@ export function createNavigation({state, api, views, location, history, balanceJ
   async function pairing() {
     const id = new URLSearchParams(location.search).get('device');
     if (!id) return false;
-    const ticket = begin('pairing', 'Вход в приложение');
+    const ticket = begin('pairing', tr('sign_in_to_the_app'));
     if (!ticket) return true;
     const device = await load(ticket, api.request('/api/device/' + encodeURIComponent(id)));
     if (!state.isCurrent(ticket)) return true;
     views.shell(
-      `<section class="panel"><div class="panel-body"><h2>Подключить приложение ARType</h2><p>Подтвердите вход только если этот же код показан в вашем приложении.</p><div class="code">${esc(device.code)}</div><div class="actions"><button data-approve="${esc(id)}" data-code="${esc(device.code)}">Код совпадает — подключить</button><a class="button quiet" href="/">Отмена</a></div></div></section>`,
-      'Вход в приложение',
-      'Google-аккаунт: ' + state.me.user.email,
+      `<section class="panel"><div class="panel-body"><h2>${tr('connect_the_artype_app')}</h2><p>${tr('only_confirm_if_the_same_code_appears_in_your_app')}</p><div class="code">${esc(device.code)}</div><div class="actions"><button data-approve="${esc(id)}" data-code="${esc(device.code)}">${tr('code_matches_connect')}</button><a class="button quiet" href="/">${tr('cancel')}</a></div></div></section>`,
+      tr('sign_in_to_the_app'),
+      tr('google_account') + state.me.user.email,
     );
     return true;
   }
@@ -156,7 +168,9 @@ export function createNavigation({state, api, views, location, history, balanceJ
       if (!state.isCurrent(ticket)) return;
       state.me = profile;
       balanceJournal.restore();
-      if (!await pairing()) {
+      if (!profile.operator && !profile.tenants.length && new URLSearchParams(location.search).has('device')) {
+        await workspacePage();
+      } else if (!await pairing()) {
         if (!state.isCurrent(ticket)) return;
         await route();
       }
@@ -171,6 +185,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
 
   async function route() {
     const hash = location.hash;
+    if (hash === '#new-workspace' || (!state.me?.operator && !state.me?.tenants.length)) return workspacePage();
     if (hash === '#providers') return providerPage();
     if (hash === '#providers/new') return providerEditorPage();
     const providerMatch = /^#providers\/([a-zA-Z0-9_-]+)\/edit$/.exec(hash);
@@ -185,7 +200,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
     return state.me?.operator ? dashboardPage() : home();
   }
 
-  const pages = {start, route, home, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
+  const pages = {start, route, home, workspacePage, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
   let renderedHash = location.hash;
   return Object.fromEntries(Object.entries(pages).map(([name, navigate]) => [name, (...args) => {
     const proceed = async () => {

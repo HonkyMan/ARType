@@ -10,5 +10,5 @@ while IFS= read -r service; do
   case "$service" in api|web) running+=("$service");; esac
 done <<< "$inventory"
 if ((${#running[@]})); then docker compose stop "${running[@]}"; fi
-docker compose exec -T db pg_restore -U artype -d artype --clean --if-exists --no-owner --single-transaction < "$backup"
+docker compose exec -T db sh -c 'exec pg_restore -U artype --dbname="$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction' < "$backup"
 if ((${#running[@]})); then docker compose up -d "${running[@]}"; fi

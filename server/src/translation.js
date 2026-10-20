@@ -12,10 +12,10 @@ async function resolveProvider(db, tenant, config) {
     try {
       providerKey = decryptCredential(saved.ciphertext, config.credentialEncryptionKey, tenant.credential);
     } catch {
-      fail(503, 'credential_unavailable', 'Не удалось прочитать ключ AI. Оператору нужно проверить ключ шифрования сервера.');
+      fail(503, 'credential_unavailable');
     }
   }
-  if (!providerKey) fail(503, 'provider_not_configured', 'Администратор ещё не подключил провайдера перевода.');
+  if (!providerKey) fail(503, 'provider_not_configured');
   return { providerKey, providerBaseURL: saved?.base_url || config.providerBaseURL };
 }
 
@@ -23,23 +23,23 @@ export async function reserve(pool, user, body, config) {
   return transaction(pool, async db => {
     const tenant = await access(db, body.tenant_id, user, config, { lock: true });
     if (tenant.status !== 'active' || (tenant.access_until && new Date(tenant.access_until) <= new Date())) {
-      fail(403, 'tenant_inactive', 'Доступ организации приостановлен или истёк. Обратитесь к администратору.');
+      fail(403, 'tenant_inactive');
     }
     await reconcileTenantBilling(db, tenant.id);
     const entitlement = await productAccess(db, tenant.id, user.email);
-    if (entitlement.app_status === 'awaiting_payment') fail(402, 'billing_unpaid', entitlement.access_message);
-    if (!entitlement.can_translate) fail(403, 'product_disabled', entitlement.access_message);
+    if (entitlement.app_status === 'awaiting_payment') fail(402, 'billing_unpaid');
+    if (!entitlement.can_translate) fail(403, 'product_disabled');
     const characters = Array.from(body.text).length;
     if (characters > tenant.max_text) {
-      fail(422, 'text_too_long', `Максимальная длина текста: ${tenant.max_text} символов.`);
+      fail(422, 'text_too_long', {limit: tenant.max_text});
     }
     if (!tenant.languages.includes(body.target) || (body.source && !tenant.languages.includes(body.source))) {
-      fail(422, 'language_not_allowed', 'Этот язык не разрешён в организации.');
+      fail(422, 'language_not_allowed');
     }
     const provider = await resolveProvider(db, tenant, config);
     const duplicate = await db.query('SELECT id FROM usage WHERE user_id=$1 AND request_id=$2', [user.id, body.request_id]);
     if (duplicate.rowCount) {
-      fail(409, 'already_processed', 'Этот запрос уже обработан. Повторите действие вручную.');
+      fail(409, 'already_processed');
     }
     // PostgreSQL now() is the transaction start, which can precede a lock wait
     // and even the current UTC month. Use one observed instant for all counters
@@ -61,10 +61,10 @@ export async function reserve(pool, user, body, config) {
     `, [tenant.id, user.id, observedAt]);
     const totals = result.rows[0];
     if (Number(totals.used) + characters > Number(tenant.monthly_characters)) {
-      fail(429, 'monthly_limit', 'Месячный лимит организации исчерпан.');
+      fail(429, 'monthly_limit');
     }
     if (totals.rpm >= tenant.rpm || totals.pending >= tenant.concurrency || totals.personal >= 2) {
-      fail(429, 'busy', 'Слишком много запросов. Повторите через минуту.');
+      fail(429, 'busy');
     }
     const id = uid();
     await db.query(`

@@ -22,7 +22,7 @@ export const settings = z.object({
 
 export function validate(schema, value) {
   const result = schema.safeParse(value);
-  if (!result.success) fail(422, 'invalid_input', 'Проверьте введённые значения.');
+  if (!result.success) fail(422, 'invalid_input');
   return result.data;
 }
 

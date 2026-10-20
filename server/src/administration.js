@@ -23,13 +23,13 @@ export function installAdministration(app, { pool, config, validate, email }) {
         // the caller after authentication but before this mutation acquired it.
         if (!config.adminEmails.includes(req.user.email)) {
           const current = await db.query('SELECT 1 FROM platform_admins WHERE email=$1', [req.user.email]);
-          if (!current.rowCount) fail(403, 'operator_required', 'Права администратора платформы отозваны.');
+          if (!current.rowCount) fail(403, 'operator_required');
         }
         if (method === 'delete') {
           if (config.adminEmails.includes(target)) {
-            fail(409, 'protected_admin', 'Основной администратор задаётся на сервере и защищён от удаления.');
+            fail(409, 'protected_admin');
           }
-          if (target === req.user.email) fail(409, 'self_removal', 'Нельзя отозвать собственные права администратора.');
+          if (target === req.user.email) fail(409, 'self_removal');
           const result = await db.query('DELETE FROM platform_admins WHERE email=$1', [target]);
           if (result.rowCount) await audit(db, req.user, 'platform.admin.remove', null, { email: target });
         } else if (!config.adminEmails.includes(target)) {

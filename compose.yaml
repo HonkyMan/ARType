@@ -4,7 +4,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: artype
+      POSTGRES_DB: ${ARTYPE_DATABASE:-artype}
       POSTGRES_USER: artype
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes: [postgres:/var/lib/postgresql/data]
@@ -21,7 +21,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
     environment:
-      DATABASE_URL: postgresql://artype:${POSTGRES_PASSWORD}@db:5432/artype
+      DATABASE_URL: postgresql://artype:${POSTGRES_PASSWORD}@db:5432/${ARTYPE_DATABASE:-artype}
       PUBLIC_URL: https://${DOMAIN:?Set DOMAIN in .env}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}

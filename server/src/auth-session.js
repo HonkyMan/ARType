@@ -31,7 +31,7 @@ export function authMiddleware(pool, config) {
   return async (request, response, next) => {
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,200})$/)?.[1];
     const token = bearer || cookies(request).artype_session;
-    if (!token) fail(401, 'sign_in_required', 'Войдите в ARType.');
+    if (!token) fail(401, 'sign_in_required');
 
     const session = (await pool.query(`
       SELECT s.*,u.id,u.email,u.name,
@@ -40,13 +40,13 @@ export function authMiddleware(pool, config) {
       WHERE token_hash=$1 AND expires_at>now()
     `, [hash(token)])).rows[0];
     if (!session || (bearer && session.kind !== 'desktop')) {
-      fail(401, 'session_expired', 'Сессия истекла. Войдите снова.');
+      fail(401, 'session_expired');
     }
 
     const browserWrite = !['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !bearer;
     if (browserWrite &&
         (request.headers.origin !== config.origin || !sameSecret(request.headers['x-csrf-token'], session.csrf))) {
-      fail(403, 'csrf', 'Обновите страницу и повторите действие.');
+      fail(403, 'csrf');
     }
 
     request.user = {

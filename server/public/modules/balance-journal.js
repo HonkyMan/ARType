@@ -1,5 +1,6 @@
+import {t as tr} from './i18n.js';
 const storagePrefix = 'artype.balance.pending.v1:';
-const unavailableMessage = 'Журнал финансовых операций недоступен. Разрешите хранилище этой вкладки и обновите страницу; новые операции пока не отправляются.';
+const unavailableMessage = () => tr('the_transaction_journal_is_unavailable_enable_storage_for_this_t');
 
 function validRequest(request) {
   return request && ['credit', 'set'].includes(request.operation) &&
@@ -21,8 +22,8 @@ export function createBalanceJournal({state, storage}) {
   const storageKey = userId => storagePrefix + encodeURIComponent(userId);
 
   function storageFailure(cause) {
-    state.balanceJournalError = unavailableMessage;
-    return new Error(unavailableMessage, {cause});
+    state.balanceJournalError = unavailableMessage();
+    return new Error(unavailableMessage(), {cause});
   }
 
   function read(userId) {
@@ -79,14 +80,14 @@ export function createBalanceJournal({state, storage}) {
   }
 
   function prepare(tenant, request, crypto) {
-    if (!state.me?.operator) throw new Error('Финансовые операции доступны администратору платформы.');
-    if (!validRequest(request)) throw new Error('Проверьте сумму и основание финансовой операции.');
+    if (!state.me?.operator) throw new Error(tr('only_platform_administrators_can_post_financial_transactions'));
+    if (!validRequest(request)) throw new Error(tr('check_the_amount_and_reason_for_this_transaction'));
     const userId = state.me.user.id;
     const operations = read(userId);
     let operation = operations.get(tenant);
     const firstAttempt = !operation;
     if (operation && operation.fingerprint !== fingerprint(request)) {
-      throw new Error('Сначала подтвердите результат предыдущей операции: повторите её с прежними суммой и основанием. Новая операция пока не отправлена.');
+      throw new Error(tr('resolve_the_previous_transaction_first_retry_with_the_same_amoun'));
     }
     if (!operation) {
       operation = {userId, tenant, key: crypto.randomUUID(), request: {...request}, fingerprint: fingerprint(request)};

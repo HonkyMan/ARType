@@ -21,7 +21,7 @@ export async function access(client, tenantId, user, config, { manage = false, l
   const tenant = (await client.query(`
     SELECT * FROM tenants WHERE id=$1 ${lock ? 'FOR UPDATE' : ''}
   `, [tenantId])).rows[0];
-  if (!tenant) fail(403, 'no_access', 'Организация недоступна.');
+  if (!tenant) fail(403, 'no_access');
 
   const membership = (await client.query(`
     SELECT * FROM memberships WHERE tenant_id=$1 AND email=$2
@@ -29,13 +29,13 @@ export async function access(client, tenantId, user, config, { manage = false, l
   `, [tenantId, user.email])).rows[0];
   const isPlatformAdmin = operator(user, config);
   if (!isPlatformAdmin && (!membership || (manage && !['owner', 'admin'].includes(membership.role)))) {
-    fail(403, 'no_access', 'Недостаточно прав.');
+    fail(403, 'no_access');
   }
   return { ...tenant, role: isPlatformAdmin ? 'operator' : membership.role };
 }
 
 export function requirePlatformAdmin(user, config) {
   if (!operator(user, config)) {
-    fail(403, 'operator_required', 'Требуются права администратора платформы.');
+    fail(403, 'operator_required');
   }
 }

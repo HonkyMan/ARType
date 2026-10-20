@@ -14,7 +14,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const prefix = 'ARType-server/';
 const payload = [
   'VERSION', 'LICENSE', 'README.md', '.env.example', 'compose.yaml', 'compose.local.yaml',
-  'docs/OPERATIONS.md', 'docs/ACCEPTANCE.md', 'docs/ARCHITECTURE.md', 'docs/ARCHIVE.md', 'docs/ROLES.md',
+  'docs/WORKSPACES.md', 'docs/OPERATIONS.md', 'docs/ACCEPTANCE.md', 'docs/ARCHITECTURE.md', 'docs/ARCHIVE.md', 'docs/ROLES.md',
   'server/src', 'server/public', 'server/package.json', 'server/package-lock.json',
   'server/Dockerfile', 'server/.dockerignore', 'server/scripts/check.mjs',
   'deployment/Caddyfile', 'deployment/setup.sh', 'deployment/configure.mjs',
