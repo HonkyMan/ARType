@@ -127,3 +127,40 @@ and no destructive reset on startup. Back up existing data and encryption keys
 before an explicit import into a fresh database. The optional `ARTYPE_DATABASE`
 Compose setting selects an already provisioned database; changing it does not
 create a new database in an existing PostgreSQL volume.
+
+## People directory and bulk invitations
+
+Platform administrators use **Users** (`#users`) to find registered accounts and
+pending membership emails in one list. It is one row per normalized email, with
+server-side search, Personal/Business/both/no-workspace filters, and 50 rows per
+page. Personal means a personal subscription exists; Business means at least one
+organization membership exists, including disabled memberships. These flags do
+not indicate payment or app entitlement. An account may have neither flag before
+choosing a plan. The personal subscription action opens its existing management
+screen; the owner has one **Personal subscription** navigation entry.
+
+Workspace lists and the dashboard's workspace table contain only Business
+organizations. Platform totals still include subscription and seat charges from
+both plans. `/api/me` returns the administrator's own memberships rather than
+enumerating all customer workspaces; administrators retain access to individual
+workspace management through the directory and workspace list.
+
+The invitation field accepts up to 200 emails per request. Tab, blur, space,
+comma, Enter, semicolon and newline create tags. Invalid tags are highlighted;
+duplicates are normalized and combined. Existing members are explicitly skipped,
+without changing their roles or product access. All new recipients use the role
+selected in the form, subject to the existing owner/admin permissions.
+
+**Connect app access immediately** defaults off. Both free and paid invitations
+have a confirmation step. `POST /api/tenants/:id/invitations/quote` previews the
+new recipients, skipped addresses and exact current-month charge. Confirmation
+uses `POST /api/tenants/:id/invitations` with the quote token and operation UUID.
+Paid invitations insert memberships and charge only those new seats in one
+transaction, including any unpaid Business base. Insufficient funds or capacity
+reject the entire operation. Concurrent changes require a new confirmed quote.
+Audit action `members.invite` stores durable idempotency request/result records;
+preserve it alongside `members.product` when setting retention policies.
+
+No invitation emails are sent. Share the console URL for Google sign-in. A
+submitted invitation draft survives an in-console trip to the deposit form until
+sign-out or page reload; it is not persisted in browser storage.

@@ -5,7 +5,7 @@ import { billingPeriod, billingSettings, reconcileTenantBilling } from './billin
 import { membershipEnabled, seatedMembership } from './membership-policy.js';
 import { fail } from './errors.js';
 
-const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const requestData = body => ({member_ids: [...body.member_ids].sort(), enabled: body.enabled});
 
 async function quote(db, tenant, body) {
@@ -14,6 +14,11 @@ async function quote(db, tenant, body) {
     [tenant.id, body.member_ids])).rows;
   if (members.length !== body.member_ids.length) fail(404, 'member_missing');
   if (tenant.role === 'admin' && members.some(m => m.role !== 'member')) fail(403, 'owner_required');
+  return quoteAccessForMembers(db, tenant, members, body.enabled);
+}
+
+// Also used for not-yet-inserted invitations; the caller holds the tenant lock.
+export async function quoteAccessForMembers(db, tenant, members, enabled) {
   // Keep the price stable until this transaction commits.
   await db.query('SELECT singleton FROM billing_settings WHERE singleton FOR SHARE');
   const prices = await billingSettings(db);
@@ -25,24 +30,24 @@ async function quote(db, tenant, body) {
   const balance = Number((await db.query('SELECT balance_cents FROM tenant_wallets WHERE tenant_id=$1', [tenant.id])).rows[0]?.balance_cents || 0);
   const unpaid = members.filter(m => !paid.has(m.email));
   const enabledOutside = (await db.query(`SELECT count(*)::int n FROM memberships m WHERE tenant_id=$1
-    AND NOT(id=ANY($2::uuid[])) AND product_enabled AND ${seatedMembership}`, [tenant.id, body.member_ids])).rows[0].n;
+    AND NOT(id=ANY($2::uuid[])) AND product_enabled AND ${seatedMembership}`, [tenant.id, members.filter(m => m.persisted !== false).map(m => m.id)])).rows[0].n;
   let blocked = null;
-  if (body.enabled) {
+  if (enabled) {
     if (tenant.status !== 'active' || tenant.access_until && new Date(tenant.access_until) <= new Date()) blocked = 'tenant_inactive';
     else if (!tenant.renewal_enabled) blocked = 'renewal_paused';
     else if (members.some(m => !membershipEnabled(m))) blocked = 'members_inactive';
     else if (enabledOutside + members.length > tenant.seats) blocked = 'seats_full';
   }
-  const base = body.enabled && !subscription ? prices.business_price_cents : 0;
-  const seats = body.enabled ? unpaid.length * prices.unit_price_cents : 0;
+  const base = enabled && !subscription ? prices.business_price_cents : 0;
+  const seats = enabled ? unpaid.length * prices.unit_price_cents : 0;
   const total = base + seats;
-  if (!blocked && body.enabled && balance < total) blocked = 'insufficient_balance';
+  if (!blocked && enabled && balance < total) blocked = 'insufficient_balance';
   const result = {
-    enabled: body.enabled, period, next_period: next.toISOString().slice(0,10),
-    selected_count: members.length, changed_count: members.filter(m => m.product_enabled !== body.enabled).length,
+    enabled: enabled, period, next_period: next.toISOString().slice(0,10),
+    selected_count: members.length, changed_count: members.filter(m => m.product_enabled !== enabled).length,
     members: members.map(m => ({id:m.id,email:m.email,product_enabled:m.product_enabled})),
-    new_paid_seats: body.enabled ? unpaid.length : 0,
-    already_paid_seats: body.enabled ? members.length - unpaid.length : 0,
+    new_paid_seats: enabled ? unpaid.length : 0,
+    already_paid_seats: enabled ? members.length - unpaid.length : 0,
     base_cents: base, seats_cents: seats, total_cents: total,
     unit_price_cents: prices.unit_price_cents,
     can_manage_balance: tenant.role !== 'admin',

@@ -10,6 +10,7 @@ export function createState() {
     connections: [],
     downloadFiles: [],
     pendingBalances: new Map(),
+    invitationDrafts: new Map(),
     balanceJournalError: '',
     sessionVersion: 0,
     navigationVersion: 0,
@@ -42,6 +43,7 @@ export function createState() {
     state.defaultModel = '';
     state.downloadFiles = [];
     state.pendingBalances.clear();
+    state.invitationDrafts.clear();
     state.balanceJournalError = '';
   };
 

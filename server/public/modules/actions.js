@@ -38,7 +38,7 @@ export function installActions({
 
   function markDirty(input) {
     const form = input.closest?.('form[data-form]');
-    if (!form) return;
+    if (!form || form.dataset.form === 'users-search') return;
     form.dataset.dirty = 'true';
     const status = form.querySelector('[data-save-state]');
     if (status) status.textContent = tr('you_have_unsaved_changes');
@@ -66,6 +66,9 @@ export function installActions({
         await navigation.openTenant(data.tenant, data.section || 'team');
       } else if (data.invoiceFilter) {
         await navigation.invoiceInboxPage(data.invoiceFilter,data.invoiceAfter);
+      } else if (data.usersPage) {
+        const query=new URLSearchParams(location.hash.split('?')[1] || '');
+        await navigation.usersPage(query.get('q') || '',query.get('type') || 'all',Number(data.usersPage));
       } else if (data.editProvider) {
         await navigation.providerEditorPage(data.editProvider);
       } else if (data.removeAdmin) {
@@ -139,6 +142,8 @@ export function installActions({
       case 'dashboard': return navigation.dashboardPage();
       case 'invoice-requests': return navigation.invoiceInboxPage();
       case 'home': return navigation.home();
+      case 'users': return navigation.usersPage();
+      case 'personal': return navigation.personalPage();
       case 'provider': return navigation.providerPage();
       case 'provider-new': return navigation.providerEditorPage();
       case 'pricing': return navigation.pricingPage();
@@ -200,6 +205,7 @@ export function installActions({
   root.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.target;
+    if (form.dataset.form === 'invite') return;
     if (form.dataset.submitting === 'true' || !state.me) return;
     const submit = form.querySelector('button[type="submit"], button:not([type])');
     const tenant = form.dataset.tenantId;
@@ -247,6 +253,10 @@ export function installActions({
 
   async function submitForm(form, values, tenant, ticket) {
     switch (form.dataset.form) {
+      case 'users-search':
+        delete form.dataset.dirty;
+        if (state.isCurrent(ticket)) await navigation.usersPage(values.q,values.type);
+        return;
       case 'workspace': {
         form.dataset.requestKey ||= crypto.randomUUID();
         const result = await api.request('/api/workspaces', 'POST', {...values,idempotency_key:form.dataset.requestKey});
@@ -324,12 +334,6 @@ export function installActions({
         views.toast(tr('organization_created_share_the_console_address_with_its_owner'));
         return;
       }
-      case 'invite':
-        await api.request(`/api/tenants/${tenant}/members`, 'POST', values);
-        delete form.dataset.dirty;
-        await reloadTenant(tenant, ticket);
-        views.toast(tr('employee_added_check_payment_status_and_share_the_console_addres'));
-        return;
       case 'settings':
         await api.request(`/api/tenants/${tenant}`, 'PATCH', values);
         delete form.dataset.dirty;

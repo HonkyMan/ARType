@@ -26,7 +26,7 @@ export async function listTenants(pool, config, user) {
       COALESCE((SELECT sum(characters) FROM usage
         WHERE tenant_id=t.id AND status='success'
           AND created_at>=date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),0)::bigint AS used_characters
-    FROM tenants t ORDER BY created_at
+    FROM tenants t WHERE t.plan='business' ORDER BY created_at
   `);
   const connections = await credentialList(pool, config);
   return {

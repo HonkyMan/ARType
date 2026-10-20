@@ -12,6 +12,7 @@ import { installConnections } from './routes/connections.js';
 import { installTenants } from './routes/tenants.js';
 import { installTranslation } from './routes/translation.js';
 import { installInvoiceInbox } from './invoice-inbox.js';
+import { installUsers } from './users.js';
 import { securityHeaders, pairingThrottle, handleError } from './http.js';
 import { validate, email } from './schemas.js';
 
@@ -36,6 +37,7 @@ export function createApp({ pool, config, google, translate }) {
   installBilling(app, { pool, config });
   if (config.invoiceInboxEnabled !== false) installInvoiceInbox(app, { pool, config });
   installProfile(app, { pool, config });
+  installUsers(app, { pool, config });
   installConnections(app, { pool, config });
   installTenants(app, { pool, config });
   installTranslation(app, { pool, config, translate });

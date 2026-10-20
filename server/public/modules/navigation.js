@@ -34,7 +34,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
       ? await load(ticket, api.request('/api/tenants'))
       : {tenants: state.me.tenants};
     if (!state.isCurrent(ticket)) return;
-    state.organizations = data.tenants;
+    state.organizations = data.tenants.filter(t=>t.plan!=='plus');
     state.credentials = data.credentials || [];
     state.connections = data.connections || [];
     state.defaultModel = data.default_model || '';
@@ -47,6 +47,19 @@ export function createNavigation({state, api, views, location, history, balanceJ
     if (!ticket) return;
     const data = await load(ticket, api.request('/api/plans'));
     if (state.isCurrent(ticket)) views.onboarding(data);
+  }
+
+  async function usersPage(q='',type='all',page=1) {
+    if (!state.me?.operator) return home();
+    const query=new URLSearchParams({q,type,page:String(page)});
+    const ticket=begin('users',tr('users'),null,'#users?'+query);
+    const data=await load(ticket,api.request('/api/users?'+query));
+    if(state.isCurrent(ticket)) views.users(data,{q,type});
+  }
+
+  async function personalPage() {
+    const personal=state.me?.tenants.find(t=>t.plan==='plus');
+    return personal ? openTenant(personal.id,'billing') : workspacePage();
   }
 
   async function dashboardPage() {
@@ -202,6 +215,13 @@ export function createNavigation({state, api, views, location, history, balanceJ
     const tenantMatch = /^#tenants\/([a-f0-9-]+)\/(team|translation|settings|usage|billing)$/.exec(hash);
     if (tenantMatch) return openTenant(tenantMatch[1], tenantMatch[2]);
     if (hash === '#admins') return adminsPage();
+    if (hash === '#personal') return personalPage();
+    if (hash === '#users' || hash.startsWith('#users?')) {
+      const query=new URLSearchParams(hash.split('?')[1] || '');
+      return usersPage((query.get('q') || '').slice(0,120),
+        ['personal','business','both','neither'].includes(query.get('type'))?query.get('type'):'all',
+        Math.max(1,Math.min(100000,Number.parseInt(query.get('page'),10)||1)));
+    }
     if (hash === '#invoice-requests' || hash.startsWith('#invoice-requests?')) {
       const query=new URLSearchParams(hash.split('?')[1] || '');
       return invoiceInboxPage(['pending','paid','all'].includes(query.get('status'))?query.get('status'):'pending',query.get('after'));
@@ -210,10 +230,10 @@ export function createNavigation({state, api, views, location, history, balanceJ
     if (hash === '#help') return helpPage();
     if (hash === '#home') return home();
     if (hash === '#new-tenant') return home(true);
-    return state.me?.operator ? dashboardPage() : home();
+    return state.me?.operator ? dashboardPage() : state.me?.tenants.some(t=>t.plan==='plus') ? personalPage() : home();
   }
 
-  const pages = {start, route, home, workspacePage, invoiceInboxPage, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
+  const pages = {start, route, home, usersPage, personalPage, workspacePage, invoiceInboxPage, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
   let renderedHash = location.hash;
   return Object.fromEntries(Object.entries(pages).map(([name, navigate]) => [name, (...args) => {
     const proceed = async () => {

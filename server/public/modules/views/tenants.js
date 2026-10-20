@@ -3,6 +3,7 @@ import {button, esc, fmt, money, roles, tag} from '../format.js';
 import {createBillingViews} from './billing.js';
 import {createTenantSettings} from './tenant-settings.js';
 import {searchBox, noMatches} from './components.js';
+import {emailTagsMarkup} from '../email-tags.js';
 
 export function createTenantViews({state, shell}) {
   const {walletContent, ledgerTable} = createBillingViews({state});
@@ -39,6 +40,7 @@ function appTag(m) {
 return m.app_status==='active'?`<span class="tag active">${tr('active_paid')}</span>`:m.app_status==='disabled'?`<span class="tag">${tr('app_not_connected')}</span>`:m.app_status==='management_only'?`<span class="tag">${tr('console_only')}</span>`:`<span class="tag disabled">${tr('disabled')} · ${m.app_status==='awaiting_payment'?tr('awaiting_payment_344'):m.app_status==='suspended'?tr('workspace_suspended'):tr('disabled_346')}</span>`}
 
 function teamTable(t,members) {
+const draft=state.invitationDrafts.get(t.id) || {emails:[],role:'member',enabled:false};
 return `<section class="panel">
       <div class="panel-head">
       <h2>${tr('team_members')}</h2><span class="muted">${members.length}</span>
@@ -81,12 +83,20 @@ return `<section class="panel">
       <form class="panel-body" data-form="invite" data-tenant-id="${t.id}">
       <p class="legal">${tr('invitation_is_free')}</p>
       <div class="inline-form">
-      <label>Google email<input type="email" name="email" placeholder="colleague@company.com" required>
-      </label>
-      <label class="role">${tr('role')}<select name="role">${['member',...(t.role!=='admin'?['admin','owner']:[])].map(r=>`<option value="${r}">${roles[r]}</option>`).join('')}</select>
-      </label>
-      <button>${tr('add_to_team')}</button>
+      <div class="email-field" data-email-field><label for="invitation-emails">Google email</label>
+        <div class="email-tags-control"><div data-email-tags>${emailTagsMarkup(draft.emails)}</div>
+          <input id="invitation-emails" type="text" inputmode="email" data-email-input autocomplete="off" autocapitalize="none" spellcheck="false"
+            placeholder="colleague@company.com" aria-describedby="invitation-email-help invitation-email-error"></div>
+        <small id="invitation-email-help">${tr('email_tags_help')}</small>
+        <small data-email-count role="status">${tr('email_count',{count:draft.emails.length})}</small>
+        <p id="invitation-email-error" class="field-error" data-email-error role="alert" hidden></p>
       </div>
+      <label class="role">${tr('role')}<select name="role">${['member',...(t.role!=='admin'?['admin','owner']:[])].map(r=>`<option value="${r}" ${r===draft.role?'selected':''}>${roles[r]}</option>`).join('')}</select>
+      </label>
+      </div>
+      <label class="connect-invitation"><input type="checkbox" name="connect_immediately" ${draft.enabled?'checked':''}><span><strong>${tr('connect_on_invite')}</strong><small>${tr('connect_on_invite_help')}</small></span></label>
+      <div class="error" data-invitation-error role="alert" tabindex="-1" hidden></div>
+      <div class="actions"><button type="submit">${tr('review_invitations')}</button></div>
       <details class="explanation"><summary>${tr('roles_billing_and_invitations')}</summary><p>${tr('a_workspace_administrator_manages_only_their_own_team_the_owner')}</p></details>${button(tr('copy_console_address'),'copy-url','quiet small')}</form>
       </section>`}
 

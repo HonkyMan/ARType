@@ -860,3 +860,26 @@ test('optional invoice inbox can be hidden without blocking dashboard or workspa
   await redirected;
   assert.equal(app.location.hash,'#home');
 });
+
+test('personal accounts never expand workspace navigation and their owners retain one personal subscription entry',async()=>{
+  const app=browserFixture();await app.signIn(operatorProfile);
+  const home=app.application.home();
+  await app.settle(app.next('/api/tenants'),{tenants:[{id:'A',name:'Business team',plan:'business',status:'active'},{id:'P',name:'Private person',plan:'plus'}]});await home;
+  assert.match(app.root.innerHTML,/Business team/);assert.doesNotMatch(app.root.innerHTML,/Private person/);
+  assert.match(app.root.innerHTML,/data-action="users"/);
+  const owner=browserFixture(browserStorage(),'#home');
+  await owner.signIn({...memberProfile,tenants:[{id:'P',name:'Private person',plan:'plus',role:'owner'}]});
+  assert.match(owner.root.innerHTML,/data-action="personal"/);assert.doesNotMatch(owner.root.innerHTML,/data-tenant="P"|Private person/);
+});
+
+test('users directory fetches bounded pages and stale list results cannot restore the page after navigation',async()=>{
+  const app=browserFixture();await app.signIn(operatorProfile);
+  const open=app.application.usersPage('alice','both',2);
+  const request=app.next('/api/users?q=alice&type=both&page=2');
+  await app.settle(request,{users:[{email:'alice@example.com',name:'Alice',registered:true,personal:true,business:true,business_count:2}],total:51,page:2,page_size:50});await open;
+  assert.equal(app.location.hash,'#users?q=alice&type=both&page=2');assert.match(app.root.innerHTML,/alice@example.com/);
+  const old=app.application.usersPage('old','all',1);const oldRequest=app.next('/api/users?q=old&type=all&page=1');
+  const help=app.application.helpPage();await app.settle(app.next('/api/downloads'),{files:[]});await help;
+  await app.settle(oldRequest,{users:[],total:0,page:1,page_size:50});await old;
+  assert.match(app.root.innerHTML,/<h1>Установка и помощь<\/h1>/);
+});

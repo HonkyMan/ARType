@@ -707,3 +707,100 @@ test('editing an expired invitation cannot extend it or silently reconnect its p
   row=(await pool.query('SELECT * FROM memberships WHERE id=$1',[m.id])).rows[0];
   assert.equal(row.product_enabled,false);assert.ok(row.expires_at>new Date());
 });
+
+async function invitationQuote(user, tenantId, body) {
+  const response=await call(`/api/tenants/${tenantId}/invitations/quote`,{actor:user,method:'POST',body});
+  assert.equal(response.status,200,JSON.stringify(response.data));
+  return response.data;
+}
+async function confirmInvitations(user, tenantId, body, quote, key=randomUUID()) {
+  return call(`/api/tenants/${tenantId}/invitations`,{actor:user,method:'POST',body:{...body,quote_token:quote.quote_token,idempotency_key:key}});
+}
+
+test('people directory combines registered and invited identities, supports both plans and hides personal spaces from workspace lists',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com'),solo=await actor('solo@example.com');
+  await actor('unassigned@example.com');await enablePlans(op);
+  const personal=await selfWorkspace(owner),soloPersonal=await selfWorkspace(solo);
+  const business=await tenant(op,owner.email,{}, {paidOwner:false});
+  await call(`/api/tenants/${business.id}/members`,{actor:owner,method:'POST',body:{email:'pending@example.com',role:'member'}});
+  const result=await call('/api/users',{actor:op});assert.equal(result.status,200);
+  const rows=result.data.users;assert.equal(rows.length,5);
+  const both=rows.find(u=>u.email===owner.email);assert.equal(both.personal,true);assert.equal(both.business,true);assert.equal(both.personal_tenant_id,personal.id);
+  assert.equal(rows.find(u=>u.email==='pending@example.com').registered,false);
+  assert.equal(rows.find(u=>u.email==='unassigned@example.com').business,false);
+  assert.equal((await call('/api/users?type=both',{actor:op})).data.total,1);
+  assert.equal((await call('/api/users?q=SOLO',{actor:op})).data.users[0].personal_tenant_id,soloPersonal.id);
+  assert.equal((await call('/api/users?type=neither',{actor:op})).data.total,2);
+  assert.equal((await call('/api/users',{actor:owner})).status,403);
+  assert.equal((await call('/api/users?type=invalid',{actor:op})).status,422);
+  assert.equal((await call('/api/users?q=%25',{actor:op})).data.total,0,'search treats percent literally');
+  assert.deepEqual((await call('/api/tenants',{actor:op})).data.tenants.map(t=>t.id),[business.id]);
+  assert.equal((await call('/api/me',{actor:op})).data.tenants.length,0,'profile does not enumerate all customer spaces');
+  assert.deepEqual((await call('/api/dashboard',{actor:op})).data.tenants.map(t=>t.id),[business.id]);
+  assert.equal((await call(`/api/tenants/${personal.id}`,{actor:op})).status,200,'directory link retains operator management');
+});
+
+test('people directory paginates a thousand identities without duplicate or unbounded pages',async()=>{
+  const op=await actor('operator@example.com');
+  await pool.query(`INSERT INTO users(id,sub,email,name) SELECT gen_random_uuid(),'directory-'||n,
+    'directory-'||lpad(n::text,4,'0')||'@example.com','Directory user '||n FROM generate_series(1,1000) n`);
+  const first=(await call('/api/users?q=directory-&page=1',{actor:op})).data;
+  const next=(await call('/api/users?q=directory-&page=2',{actor:op})).data;
+  assert.equal(first.total,1000);assert.equal(first.users.length,50);assert.equal(next.users.length,50);
+  assert.equal(new Set([...first.users,...next.users].map(u=>u.email)).size,100);
+  assert.equal((await call('/api/users?q=directory-&page=21',{actor:op})).data.users.length,0);
+});
+
+test('bulk invitations normalize duplicates, skip existing members and replay atomically without overwriting roles',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,owner.email,{}, {paidOwner:false});
+  const body={emails:[' A@Example.com ','a@example.com','b@example.com',owner.email],role:'member',enabled:false};
+  const q=await invitationQuote(owner,t.id,body);assert.equal(q.selected_count,2);assert.equal(q.total_cents,0);
+  assert.deepEqual(q.skipped_emails,[owner.email]);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM memberships WHERE tenant_id=$1',[t.id])).rows[0].n,1);
+  const key=randomUUID();const results=await Promise.all([confirmInvitations(owner,t.id,body,q,key),confirmInvitations(owner,t.id,body,q,key)]);
+  assert.deepEqual(results.map(r=>r.status),[201,201]);assert.deepEqual(results[0].data,results[1].data);
+  const members=(await pool.query('SELECT * FROM memberships WHERE tenant_id=$1 ORDER BY email',[t.id])).rows;
+  assert.equal(members.length,3);assert.ok(members.every(m=>!m.product_enabled));assert.equal(members.find(m=>m.email===owner.email).role,'owner');
+  assert.equal((await confirmInvitations(owner,t.id,{...body,enabled:true},q,key)).status,409);
+  const all=await invitationQuote(owner,t.id,body);assert.equal(all.blocked,'no_new_members');
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1',[t.id])).rows[0].n,0);
+});
+
+test('immediate bulk connection rejects insufficient funds without invitations, then charges only selected new employees',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,owner.email,{}, {paidOwner:false});
+  const body={emails:['a@example.com','b@example.com'],role:'member',enabled:true};
+  let q=await invitationQuote(owner,t.id,body);assert.equal(q.total_cents,2000);assert.equal(q.blocked,'insufficient_balance');
+  assert.equal((await confirmInvitations(owner,t.id,body,q)).status,402);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM memberships WHERE tenant_id=$1',[t.id])).rows[0].n,1);
+  await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:2000,reason:'Test payment',idempotency_key:randomUUID()}});
+  assert.equal((await confirmInvitations(owner,t.id,body,q)).data.error.code,'access_quote_changed');
+  q=await invitationQuote(owner,t.id,body);assert.equal(q.total_cents,1000);
+  const key=randomUUID();assert.equal((await confirmInvitations(owner,t.id,body,q,key)).status,201);
+  assert.equal((await confirmInvitations(owner,t.id,body,q,key)).data.charged_cents,1000);
+  const members=(await pool.query('SELECT email,product_enabled FROM memberships WHERE tenant_id=$1',[t.id])).rows;
+  assert.equal(members.filter(m=>m.product_enabled).length,2);assert.equal(members.find(m=>m.email===owner.email).product_enabled,false);
+  assert.equal(Number((await pool.query('SELECT balance_cents FROM tenant_wallets WHERE tenant_id=$1',[t.id])).rows[0].balance_cents),0);
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1',[t.id])).rows[0].n,2);
+});
+
+test('bulk invitation authorization, validation, stale prices and capacity cannot bypass confirmed billing',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com'),admin=await actor('admin@example.com'),stranger=await actor('stranger@example.com');
+  const t=await tenant(op,owner.email,{seats:2});
+  await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:admin.email,role:'admin'}});
+  const path=`/api/tenants/${t.id}/invitations/quote`, body={emails:['a@example.com'],role:'member',enabled:true};
+  assert.equal((await call(path,{actor:stranger,method:'POST',body})).status,403);
+  assert.equal((await call(path,{actor:admin,method:'POST',body:{...body,role:'owner'}})).status,403);
+  for(const emails of [[],['bad'],Array(201).fill('a@example.com')])assert.equal((await call(path,{actor:owner,method:'POST',body:{...body,emails}})).status,422);
+  const hidden=await invitationQuote(admin,t.id,body);assert.equal(hidden.balance_cents,null);assert.equal(hidden.can_manage_balance,false);
+  let q=await invitationQuote(owner,t.id,body);
+  await pool.query('UPDATE billing_settings SET unit_price_cents=600');
+  assert.equal((await confirmInvitations(owner,t.id,body,q)).data.error.code,'access_quote_changed');
+  q=await invitationQuote(owner,t.id,{...body,emails:['a@example.com','b@example.com']});assert.equal(q.blocked,'seats_full');
+  assert.equal((await confirmInvitations(owner,t.id,{...body,emails:['a@example.com','b@example.com']},q)).status,409);
+  q=await invitationQuote(owner,t.id,body);
+  const other={...body,emails:['b@example.com']},otherQuote=await invitationQuote(owner,t.id,other);
+  const results=await Promise.all([confirmInvitations(owner,t.id,body,q),confirmInvitations(owner,t.id,other,otherQuote)]);
+  assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);
+});

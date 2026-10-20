@@ -11,6 +11,8 @@ import {createTenantViews} from './views/tenants.js';
 import {createPlatformViews} from './views/platform.js';
 import {createHelpViews} from './views/help.js';
 import {createInvoiceInboxViews} from './views/invoice-inbox.js';
+import {createUserViews} from './views/users.js';
+import {installInvitations} from './invitations.js';
 
 export function createConsole(environment) {
   const state = createState();
@@ -22,6 +24,7 @@ export function createConsole(environment) {
     ...createPlatformViews({state, shell: shell.shell}),
     ...createHelpViews({state, location: environment.location}),
     ...createInvoiceInboxViews({shell:shell.shell}),
+    ...createUserViews({shell:shell.shell}),
   };
   const api = createApi({state, fetch: environment.fetch, onSessionEnd: views.login});
   const balanceJournal = createBalanceJournal({state, storage: environment.sessionStorage});
@@ -29,5 +32,6 @@ export function createConsole(environment) {
   installValidation(shell.root);
   installActions({state, api, navigation, views, balanceJournal, ...environment});
   installMemberAccess({state,api,navigation,views,...environment});
+  installInvitations({state,api,navigation,views,...environment});
   return navigation;
 }

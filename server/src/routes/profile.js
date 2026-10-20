@@ -7,7 +7,9 @@ export function installProfile(app, { pool, config }) {
     await transaction(pool, db => activateMemberships(db, req.user.email));
     const isOperator = operator(req.user, config);
     const result = isOperator
-      ? await pool.query("SELECT t.*,'operator' AS role FROM tenants t ORDER BY created_at")
+      ? await pool.query(`SELECT t.*,'operator' AS role FROM tenants t
+          WHERE t.personal_owner_id=$1 OR EXISTS(SELECT 1 FROM memberships m
+            WHERE m.tenant_id=t.id AND m.email=$2 AND m.status='active') ORDER BY t.created_at`, [req.user.id, req.user.email])
       : await pool.query(`
         SELECT t.*,m.role FROM tenants t JOIN memberships m ON t.id=m.tenant_id
         WHERE m.email=$1 AND m.status='active' ORDER BY t.created_at

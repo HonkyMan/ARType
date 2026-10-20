@@ -92,7 +92,7 @@ export async function dashboard(pool, config, user) {
     ...row, balance_cents: Number(row.balance_cents), invoice_amount_cents: Number(row.invoice_amount_cents),
   }));
   return {
-    ...settings, period, tenants,
+    ...settings, period, tenants:tenants.filter(t=>t.plan==='business'),
     billed_seats: tenants.reduce((sum, tenant) => sum + tenant.billed_seats, 0),
     invoice_amount_cents: tenants.reduce((sum, tenant) => sum + tenant.invoice_amount_cents, 0),
     connected_seats: tenants.reduce((sum, tenant) => sum + tenant.connected_seats, 0),
