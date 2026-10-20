@@ -22,6 +22,7 @@ return `<section class="panel" id="new-tenant">
       </label>
       <label>Символов в месяц<input name="monthly_characters" type="number" min="1" max="1000000000000" value="1000000" required>
       </label>
+      ${languageOptions(['ru', 'en', 'bn', 'hi', 'zh'])}
       </div>${!credentials.length?`<div class="notice">Сначала сохраните API-ключ в разделе «AI-провайдер». ${button('Подключить AI','provider','quiet small')}</div>`:''}<div class="actions">
       <button ${!credentials.length?'disabled':''}>Создать и пригласить владельца</button><small>Приглашение действует 7 дней.</small>
       </div>
@@ -175,6 +176,17 @@ function field(label,name,value,type='text',more='') {
 return `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${more}>
       </label>`}
 
+function languageOptions(selected) {
+  return `<fieldset class="language-picker wide" data-languages>
+      <legend>Языки перевода</legend>
+      <p>Выбранные языки будут доступны сотрудникам в настройках ARType.</p>
+      <div class="language-options">${Object.entries(languages).map(([code, name])=>`<label>
+      <input type="checkbox" name="languages" value="${code}" ${selected.includes(code)?'checked':''}>
+      <span>${esc(name)}</span></label>`).join('')}</div>
+      <small>Выберите хотя бы один язык. Изменения появятся при обновлении настроек организации в программе.</small>
+      </fieldset>`;
+}
+
 function settingsForm(t) {
   const {me, connections} = state;
 return `<section class="panel">
@@ -182,8 +194,7 @@ return `<section class="panel">
       <h2>Корпоративные правила</h2><span class="muted">Версия ${t.revision}</span>
       </div>
       <form class="panel-body" data-form="settings" data-tenant-id="${t.id}">
-      <div class="fields">${field('Название','name',t.name,'text','required maxlength="120"')}<label>Разрешённые языки (коды через запятую)<input name="languages" value="${esc(t.languages.join(', '))}" required><small>${Object.keys(languages).join(', ')}</small>
-      </label>
+      <div class="fields">${field('Название','name',t.name,'text','required maxlength="120"')}${languageOptions(t.languages)}
       <label class="wide">Словарь и инструкции для перевода<textarea name="instructions" maxlength="8000">${esc(t.instructions)}</textarea><small>Терминология, имена продуктов и пожелания по переводу.</small>
       </label>${me.operator?`${field('Модель','model',t.model,'text','required maxlength="200"')}<label>Серверное подключение<select name="credential" required>${connectionOptions(t.credential)}</select><small data-connection-url>${esc(connections.find(c=>c.alias===t.credential)?.base_url||'')}</small>
       </label>${field('Количество мест','seats',t.seats,'number','required min="1" max="100000"')}${field('Символов в месяц','monthly_characters',t.monthly_characters,'number','required min="1" max="1000000000000"')}${field('Символов в одном запросе','max_text',t.max_text,'number','required min="1" max="20000"')}${field('Запросов в минуту','rpm',t.rpm,'number','required min="1" max="10000"')}${field('Одновременных переводов','concurrency',t.concurrency,'number','required min="1" max="500"')}${field('Доступ до (необязательно)','access_until',t.access_until?new Date(new Date(t.access_until)-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):'','datetime-local')}<label>Статус<select name="status"><option value="active" ${t.status==='active'?'selected':''}>Активен</option><option value="suspended" ${t.status==='suspended'?'selected':''}>Приостановлен</option></select>
@@ -229,24 +240,7 @@ const rs=details.recent;return `<section class="panel">
       </div>
       <button class="secondary small" data-tenant="${t.id}">Открыть пространство ↗</button>
       </div>`).join('');
-  shell(`<div class="grid">
-      <div class="metric">
-      <div class="label">Рабочие пространства</div>
-      <div class="value">${organizations.length}</div>
-      <div class="unit">Организации с отдельными правилами</div>
-      </div>
-      <div class="metric">
-      <div class="label">Управление доступом</div>
-      <div class="value">Google</div>
-      <div class="unit">Личная учётная запись сотрудника</div>
-      </div>
-      <div class="metric">
-      <div class="label">Переводы</div>
-      <div class="value">По запросу</div>
-      <div class="unit">Без хранения текстов в кабинете</div>
-      </div>
-      </div>
-      <section class="panel">
+  shell(`<section class="panel">
       <div class="panel-head">
       <h2>Ваши организации</h2><span class="muted">${organizations.length}</span>
       </div>${cards||'<div class="empty"><h2>Пока нет рабочих пространств</h2><p>Попросите администратора пригласить вас по адресу '+esc(me.user.email)+'. Затем обновите страницу.</p>'+button('Обновить доступ','refresh','secondary')+'</div>'}</section>${me.operator?createForm():''}`,'Рабочие пространства','Команды, доступ и правила перевода — в одном месте.',me.operator?button('+ Подключить организацию','new-tenant'):'');

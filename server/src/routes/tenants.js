@@ -10,6 +10,7 @@ const creation = settings.partial().extend({
   name: settings.shape.name,
   model: settings.shape.model,
   credential: settings.shape.credential,
+  languages: settings.shape.languages.default(['ru', 'en', 'bn', 'hi', 'zh']),
   owner_email: email,
 }).strict();
 const invitation = z.object({ email, role: z.enum(['owner', 'admin', 'member']) }).strict();

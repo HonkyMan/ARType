@@ -91,6 +91,44 @@ test('connection metadata routes each tenant and changing destinations requires 
   assert.equal((await call(`/api/tenants/${t.id}`,{actor:owner,method:'PATCH',body:{credential:'main'}})).status,403);
 });
 
+test('creating connections cannot replace stored or environment credentials, even concurrently', async () => {
+  const op = await actor('operator@example.com'), owner = await actor('owner@example.com');
+  const body = {key:'unique-provider-key', base_url:'https://provider.example/v1', default_model:'model-one'};
+  const path = '/api/provider-credentials/unique';
+  assert.equal((await call(path, {actor:owner, method:'POST', body})).status, 403);
+  const responses = await Promise.all([
+    call(path, {actor:op, method:'POST', body}),
+    call(path, {actor:op, method:'POST', body}),
+  ]);
+  assert.deepEqual(responses.map(r=>r.status).sort(), [201,409]);
+  const original = (await pool.query("SELECT ciphertext FROM provider_credentials WHERE alias='unique'")).rows[0].ciphertext;
+  assert.equal((await call(path, {actor:op, method:'POST', body:{...body,key:'overwrite-attempt'}})).status,409);
+  assert.equal((await pool.query("SELECT ciphertext FROM provider_credentials WHERE alias='unique'")).rows[0].ciphertext,original);
+  assert.equal((await call('/api/provider-credentials/main', {actor:op,method:'POST',body})).status,409);
+  assert.equal((await call(path, {actor:op, method:'PUT', body:{default_model:'model-two'}})).status,200);
+  assert.equal((await pool.query("SELECT ciphertext FROM provider_credentials WHERE alias='unique'")).rows[0].ciphertext,original);
+});
+
+test('Bengali, Hindi and Chinese reach the managed profile and translation prompt; tenant restrictions still apply', async () => {
+  const op = await actor('operator@example.com'), owner = await actor('owner@example.com');
+  const t = await tenant(op,'owner@example.com');
+  const profile = (await call('/api/me',{actor:owner})).data;
+  assert.deepEqual(profile.tenants[0].languages, ['ru','en','bn','hi','zh']);
+  for (const [target,name] of [['bn','Bengali'],['hi','Hindi'],['zh','Chinese']]) {
+    const result = await call('/api/translate',{actor:owner,method:'POST',body:{
+      tenant_id:t.id,request_id:randomUUID(),text:'Привет, команда!',source:'ru',target,
+    }});
+    assert.equal(result.status,200);
+    assert.match(upstreamCalls.at(-1).messages[0].content,new RegExp(name));
+  }
+  assert.equal((await call(`/api/tenants/${t.id}`,{actor:owner,method:'PATCH',body:{languages:['ru','en']}})).status,200);
+  const result = await call('/api/translate',{actor:owner,method:'POST',body:{
+    tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'bn',
+  }});
+  assert.equal(result.status,422);
+  assert.equal(upstreamCalls.length,3);
+});
+
 test('published installer downloads require login and expose only manifest-listed files',async()=>{
   const member=await actor('member@example.com');
   const filename='ARType-0.1.18-test.exe',bytes='test-installer-bytes';

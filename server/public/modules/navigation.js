@@ -1,16 +1,17 @@
 import {StaleResponse} from './api.js';
 import {esc} from './format.js';
 
-export function createNavigation({state, api, views, location, balanceJournal}) {
+export function createNavigation({state, api, views, location, history, balanceJournal}) {
   const signedIn = () => {
     if (state.me) return true;
     views.login();
     return false;
   };
 
-  function begin(section, title, tenant = null) {
+  function begin(section, title, tenant = null, hash = `#${section}`) {
     if (!signedIn()) return null;
     const ticket = state.navigate(section, tenant);
+    if (location.hash !== hash) history.pushState({}, '', hash);
     views.shell('<div class="loading">Загружаем…</div>', title, '');
     return ticket;
   }
@@ -25,7 +26,7 @@ export function createNavigation({state, api, views, location, balanceJournal}) 
   }
 
   async function home() {
-    const ticket = begin('home', 'Рабочие пространства');
+    const ticket = begin('home', 'Рабочие пространства', null, location.hash === '#new-tenant' ? '#new-tenant' : '#home');
     if (!ticket) return;
     const data = state.me.operator
       ? await load(ticket, api.request('/api/tenants'))
@@ -47,13 +48,23 @@ export function createNavigation({state, api, views, location, balanceJournal}) 
 
   async function providerPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('provider', 'AI-провайдер');
+    const ticket = begin('provider', 'AI-провайдеры', null, '#providers');
     const data = await load(ticket, api.request('/api/provider-credentials'));
     if (!state.isCurrent(ticket)) return;
     state.defaultModel = data.default_model || '';
     state.connections = data.credentials;
     state.credentials = state.connections.map(connection => connection.alias);
     views.provider(data);
+  }
+
+  async function providerEditorPage(alias = null) {
+    if (!state.me?.operator) return home();
+    const hash = alias === null ? '#providers/new' : `#providers/${encodeURIComponent(alias)}/edit`;
+    const ticket = begin('provider-edit', alias === null ? 'Новое подключение' : 'Редактирование подключения', null, hash);
+    const data = await load(ticket, api.request('/api/provider-credentials'));
+    if (!state.isCurrent(ticket)) return;
+    state.connections = data.credentials;
+    views.providerEditor(data, alias);
   }
 
   async function adminsPage() {
@@ -77,7 +88,7 @@ export function createNavigation({state, api, views, location, balanceJournal}) 
     const tenant = state.me.tenants.find(item => item.id === id);
     if (!tenant && !state.me.operator) return home();
     if (!['team', 'settings', 'usage', 'billing'].includes(section)) section = 'team';
-    const ticket = begin(section, 'Рабочее пространство', id);
+    const ticket = begin(section, 'Рабочее пространство', id, `#tenants/${encodeURIComponent(id)}/${section}`);
     if (tenant?.role === 'member') {
       const data = await load(ticket, api.request('/api/downloads'));
       if (!state.isCurrent(ticket)) return;
@@ -126,8 +137,7 @@ export function createNavigation({state, api, views, location, balanceJournal}) 
       balanceJournal.restore();
       if (!await pairing()) {
         if (!state.isCurrent(ticket)) return;
-        if (state.me.operator && location.hash !== '#new-tenant') await dashboardPage();
-        else await home();
+        await route();
       }
     } catch (error) {
       if (error instanceof StaleResponse) return;
@@ -138,5 +148,19 @@ export function createNavigation({state, api, views, location, balanceJournal}) 
     }
   }
 
-  return {start, home, dashboardPage, providerPage, adminsPage, helpPage, openTenant};
+  async function route() {
+    const hash = location.hash;
+    if (hash === '#providers') return providerPage();
+    if (hash === '#providers/new') return providerEditorPage();
+    const providerMatch = /^#providers\/([a-zA-Z0-9_-]+)\/edit$/.exec(hash);
+    if (providerMatch) return providerEditorPage(providerMatch[1]);
+    const tenantMatch = /^#tenants\/([a-f0-9-]+)\/(team|settings|usage|billing)$/.exec(hash);
+    if (tenantMatch) return openTenant(tenantMatch[1], tenantMatch[2]);
+    if (hash === '#admins') return adminsPage();
+    if (hash === '#help') return helpPage();
+    if (hash === '#home' || hash === '#new-tenant') return home();
+    return state.me?.operator ? dashboardPage() : home();
+  }
+
+  return {start, route, home, dashboardPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant};
 }

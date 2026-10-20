@@ -28,4 +28,11 @@ export function installConnections(app, { pool, config }) {
     await saveConnection(pool, config, req.user, alias, validate(connectionChanges, req.body));
     res.json({ ok: true });
   });
+  app.post('/api/provider-credentials/:alias', async (req, res) => {
+    requirePlatformAdmin(req.user, config);
+    const alias = validate(settings.shape.credential, req.params.alias);
+    const changes = validate(connectionChanges, req.body);
+    await saveConnection(pool, config, req.user, alias, changes, { createOnly: true });
+    res.status(201).json({ ok: true });
+  });
 }

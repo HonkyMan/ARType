@@ -60,7 +60,7 @@ function shell(content,title,description,actions='') {
   if (!me) return;
   root.innerHTML=`<div class="shell">
       <aside class="sidebar">${brand}<div class="eyebrow">Управление</div>
-      <nav>${me.operator?button('▦ &nbsp; Dashboard','dashboard',`navitem ${section==='dashboard'?'active':''}`):''}${button('◈ &nbsp; Рабочие пространства','home',`navitem ${!current&&section==='home'?'active':''}`)}${me.tenants.map(t=>`<button class="navitem ${current===t.id?'active':''}" data-tenant="${t.id}">${esc(t.name)}</button>`).join('')}${me.operator?button('◇ &nbsp; AI-провайдер','provider',`navitem ${section==='provider'?'active':''}`)+button('⚙ &nbsp; Администраторы','admins',`navitem ${section==='admins'?'active':''}`):''}${button('↗ &nbsp; Установка и помощь','help','navitem')}</nav>
+      <nav>${me.operator?button('▦ &nbsp; Dashboard','dashboard',`navitem ${section==='dashboard'?'active':''}`):''}${button('◈ &nbsp; Рабочие пространства','home',`navitem ${!current&&section==='home'?'active':''}`)}${me.tenants.map(t=>`<button class="navitem ${current===t.id?'active':''}" data-tenant="${t.id}">${esc(t.name)}</button>`).join('')}${me.operator?button('◇ &nbsp; AI-провайдеры','provider',`navitem ${section.startsWith('provider')?'active':''}`)+button('⚙ &nbsp; Администраторы','admins',`navitem ${section==='admins'?'active':''}`):''}${button('↗ &nbsp; Установка и помощь','help','navitem')}</nav>
       <footer><span>Вы вошли как</span>
       <div class="identity"><span class="avatar">${esc(me.user.name.slice(0,1))}</span>
       <div>${esc(me.user.name)}<br><small>${esc(me.user.email)}</small>

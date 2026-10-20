@@ -3,3 +3,17 @@
 .download{padding:10px 0 25px}.download+.download{border-top:1px solid #eee9f3;padding-top:25px}.download details{margin-top:14px;color:#7b7487;font-size:12px}.hash{display:block;overflow-wrap:anywhere;margin-top:10px}.row-actions select{max-width:210px}
 
 .balance-value{font-size:32px;font-weight:650;margin:12px 0}.balance-form{border-top:1px solid #e6e1eb;padding-top:25px;margin-top:25px}.row-actions{flex-wrap:wrap}.invoice-placeholder{margin-top:20px}
+
+.language-picker{margin:0;padding:20px;border:1px solid #e6e1eb;border-radius:9px;min-width:0}
+.language-picker legend{padding:0 6px;font-size:13px;font-weight:600;color:#5f586e}
+.language-picker p{font-size:13px;margin-bottom:16px}
+.language-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:16px}
+.language-options label{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e6e1eb;border-radius:7px;cursor:pointer}
+.language-options label:has(input:checked){background:#f4f0ff;border-color:#b6a2ee;color:#4c368d}
+.language-options input{width:16px;height:16px;margin:0;accent-color:#6944f5;flex-shrink:0}
+.connections-table td{vertical-align:top}
+.connections-table button{white-space:nowrap}
+.connection-address,.connection-model{overflow-wrap:anywhere;min-width:170px;max-width:320px}
+.connection-editor{max-width:1000px}
+.connection-editor label small{display:block;margin-top:8px;font-weight:400}
+.connection-editor input[readonly]{background:#f6f4f8;color:#736b80}

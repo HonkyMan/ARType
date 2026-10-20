@@ -27,7 +27,7 @@ export async function credentialList(client, config) {
   return [...saved, ...environment];
 }
 
-export async function saveConnection(pool, config, user, alias, changes) {
+export async function saveConnection(pool, config, user, alias, changes, { createOnly = false } = {}) {
   requirePlatformAdmin(user, config);
   if (!config.credentialEncryptionKey) {
     fail(503, 'encryption_not_configured', 'Нужно задать CREDENTIAL_ENCRYPTION_KEY в конфигурации сервера и пересоздать API.');
@@ -36,6 +36,9 @@ export async function saveConnection(pool, config, user, alias, changes) {
     await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['provider:' + alias]);
     const result = await db.query('SELECT * FROM provider_credentials WHERE alias=$1', [alias]);
     const existing = result.rows[0];
+    if (createOnly && (existing || config.providerKeys[alias])) {
+      fail(409, 'connection_exists', 'Подключение с таким названием уже существует. Откройте его для редактирования или выберите другое название.');
+    }
     // Existing v4 URLs were stored without canonical host/default-port spelling.
     // Normalize for equality without revalidating the old destination, so an
     // administrator can still repair a formerly accepted URL with a fresh key.

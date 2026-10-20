@@ -19,7 +19,7 @@ export function createConsole(environment) {
   };
   const api = createApi({state, fetch: environment.fetch, onSessionEnd: views.login});
   const balanceJournal = createBalanceJournal({state, storage: environment.sessionStorage});
-  const navigation = createNavigation({state, api, views, balanceJournal, location: environment.location});
+  const navigation = createNavigation({state, api, views, balanceJournal, location: environment.location, history: environment.history});
   installActions({state, api, navigation, views, balanceJournal, ...environment});
   return navigation;
 }

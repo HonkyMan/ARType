@@ -3,22 +3,21 @@ import {button, esc, fmt, money, tag} from '../format.js';
 export function createPlatformViews({state, shell}) {
 
 function connectionForm(c,canManage) {
-const existing=!!c.alias;return `<section class="panel">
-      <div class="panel-head">
-      <h2>${existing?esc(c.alias):'Новое подключение'}</h2><small>${existing?(c.source==='admin'?'Сохранено в кабинете':'Задано на сервере'):''}</small>
-      </div>
-      <form class="panel-body" data-form="provider">
+const existing=!!c.alias;return `<section class="panel connection-editor">
+      <div class="panel-head"><h2>Параметры подключения</h2>
+      ${existing?'<span class="tag active">Ключ сохранён</span>':''}</div>
+      <form class="panel-body" data-form="provider" data-mode="${existing?'edit':'create'}">
       <div class="fields">
-      <label>Название подключения<input name="alias" value="${esc(c.alias)}" ${existing?'readonly':''} required maxlength="64" pattern="[a-zA-Z0-9_-]+" placeholder="openrouter"><small>Выбирается в настройках организации.</small>
+      <label>Название подключения<input name="alias" value="${esc(c.alias)}" ${existing?'readonly':''} required maxlength="64" pattern="[a-zA-Z0-9_-]+" placeholder="openrouter"><small>${existing?'Идентификатор используется организациями и не меняется.':'Латинские буквы, цифры, дефис и подчёркивание. Выбирается в настройках организации.'}</small>
       </label>
       <label>Адрес API провайдера<input name="base_url" type="url" value="${esc(c.base_url)}" required maxlength="2048" placeholder="https://openrouter.ai/api/v1"><small>Базовый URL без /chat/completions.</small>
       </label>
-      <label>Модель по умолчанию<input name="default_model" value="${esc(c.default_model)}" required maxlength="200" placeholder="google/gemma-3-4b-it">
+      <label>Модель по умолчанию<input name="default_model" value="${esc(c.default_model)}" required maxlength="200" placeholder="google/gemma-3-4b-it"><small>Подставляется при выборе подключения. У существующих организаций сохраняется их модель.</small>
       </label>
-      <label>API-ключ<input name="key" type="password" autocomplete="new-password" ${existing?'':'required'} maxlength="4096"><small>${existing?'Оставьте пустым, чтобы сохранить текущий ключ.':'После сохранения значение не показывается.'}</small>
+      <label>API-ключ<input name="key" type="password" autocomplete="new-password" ${existing?'':'required'} maxlength="4096"><small>${existing?'Пустое поле сохраняет текущий ключ. При смене адреса введите ключ заново.':'После сохранения значение не показывается.'}</small>
       </label>
       </div>${!canManage?'<div class="notice">На сервере нужно настроить CREDENTIAL_ENCRYPTION_KEY и пересоздать API.</div>':''}<div class="actions">
-      <button ${!canManage?'disabled':''}>Сохранить подключение</button><small>Изменения применяются без перезапуска сервера.</small>
+      <button ${!canManage?'disabled':''}>${existing?'Сохранить изменения':'Создать подключение'}</button>${button('Отмена','provider','quiet')}
       </div>
       <p class="legal">Ключ хранится на сервере в зашифрованном виде. Администраторы организаций и сотрудники не получают его.</p>
       </form>
@@ -89,8 +88,35 @@ const existing=!!c.alias;return `<section class="panel">
   }
 
   function provider(data) {
-    const {connections, defaultModel} = state;
-  shell(`<div class="notice">Подключение объединяет адрес API, ключ и модель по умолчанию. При создании организации выберите подключение и при необходимости измените модель. Замена адреса применяется ко всем организациям с этим подключением и требует повторного ввода ключа.</div>${connections.map(c=>connectionForm(c,data.can_manage)).join('')}${connectionForm({alias:'',base_url:data.provider_base_url,default_model:defaultModel},data.can_manage)}`,'AI-провайдер','Адреса, модели и ключи подключений — в настройках платформы.');
+    const rows = data.credentials.map(c=>`<tr>
+      <td><strong>${esc(c.alias)}</strong><br><small>${c.source==='admin'?'Настроено в кабинете':'Настроено на сервере'}</small></td>
+      <td class="connection-address">${esc(c.base_url)}</td>
+      <td class="connection-model">${esc(c.default_model||'Не задана')}</td>
+      <td><span class="tag active">Сохранён</span></td>
+      <td><button class="quiet small" data-edit-provider="${esc(c.alias)}" aria-label="Редактировать ${esc(c.alias)}">Редактировать ↗</button></td>
+      </tr>`).join('');
+    shell(`<section class="panel">
+      <div class="panel-head"><h2>Подключения</h2><span class="muted">${data.credentials.length}</span></div>
+      ${rows?`<div class="table-wrap"><table class="connections-table">
+      <thead><tr><th>НАЗВАНИЕ</th><th>АДРЕС API</th><th>МОДЕЛЬ ПО УМОЛЧАНИЮ</th><th>API-КЛЮЧ</th><th>ДЕЙСТВИЯ</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`:`<div class="empty"><h2>Подключите первый AI-провайдер</h2><p>Укажите адрес API, модель и ключ. После этого подключение можно назначить организации.</p>${button('Создать подключение','provider-new')}</div>`}
+      </section><p class="legal">Каждая организация использует выбранное подключение и свою модель. API-ключи доступны только серверу.</p>`,
+      'AI-провайдеры','Подключения для перевода в ваших организациях.',button('+ Создать подключение','provider-new'));
+  }
+
+  function providerEditor(data, alias = null) {
+    const connection = alias === null
+      ? {alias:'', base_url:data.provider_base_url, default_model:data.default_model}
+      : data.credentials.find(c=>c.alias===alias);
+    if (!connection) {
+      shell(`<div class="notice">Подключение не найдено. Оно могло быть удалено из настроек сервера.</div>${button('К списку подключений','provider','secondary')}`,
+        'Подключение недоступно','Обновите список и выберите существующее подключение.');
+      return;
+    }
+    shell(`${alias!==null?'<div class="notice">Изменение адреса API или ключа применяется ко всем организациям с этим подключением. Для нового адреса необходимо повторно ввести ключ.</div>':''}${connectionForm(connection,data.can_manage)}`,
+      alias===null?'Новое подключение':`Подключение: ${alias}`,
+      alias===null?'Добавьте AI-провайдера, чтобы назначать его организациям.':'Измените параметры и сохраните подключение.',
+      button('← Все подключения','provider','quiet'));
   }
 
   function admins(data) {
@@ -132,5 +158,5 @@ const existing=!!c.alias;return `<section class="panel">
       </section>`,'Администраторы платформы','Доступ выдаётся и отзывается только администраторами платформы.');
   }
 
-  return {dashboard, provider, admins};
+  return {dashboard, provider, providerEditor, admins};
 }

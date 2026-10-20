@@ -16,3 +16,6 @@ const application = createConsole({
 });
 
 void application.start();
+window.addEventListener('popstate', () => {
+  void application.start();
+});

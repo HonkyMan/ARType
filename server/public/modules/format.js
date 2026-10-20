@@ -27,8 +27,10 @@ export const statuses = {
   success: 'Готово', failed: 'Ошибка', pending: 'В процессе',
 };
 export const languages = {
-  ru: 'Русский', en: 'English', zh: '中文', hi: 'हिन्दी', es: 'Español',
-  fr: 'Français', ar: 'العربية', bn: 'বাংলা', pt: 'Português', id: 'Indonesia',
+  ru: 'Русский', en: 'Английский · English', bn: 'Бенгальский · বাংলা',
+  hi: 'Хинди · हिन्दी', zh: 'Китайский · 中文', es: 'Испанский · Español',
+  fr: 'Французский · Français', ar: 'Арабский · العربية',
+  pt: 'Португальский · Português', id: 'Индонезийский · Indonesia',
 };
 export const brand = '<a class="brand" href="/"><img src="/assets/artype-mark.svg" alt="">ARType</a>';
 export const button = (text, action, classes = '') =>

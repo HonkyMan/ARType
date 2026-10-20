@@ -37,7 +37,7 @@ function browserStorage() {
   };
 }
 
-function browserFixture(storage = browserStorage()) {
+function browserFixture(storage = browserStorage(), hash = '') {
   const listeners = {};
   const root = {
     innerHTML: '', addEventListener(name, handler) { listeners[name] = handler; },
@@ -45,17 +45,25 @@ function browserFixture(storage = browserStorage()) {
   };
   const message = {textContent: '', hidden: true};
   const pending = [];
+  const location = {search: '', hash, origin: 'https://artype.test'};
   const application = createConsole({
     document: {querySelector(selector) { return selector === '#app' ? root : message; }},
     fetch(path, options) {
       const savedAtSend = [...(storage.values?.values() || [])];
       return new Promise((resolve, reject) => pending.push({path, options, savedAtSend, resolve, reject, settled: false}));
     },
-    setTimeout() {}, location: {search: '', hash: '', origin: 'https://artype.test'},
-    history: {replaceState() {}}, navigator: {clipboard: {writeText: async () => {}}},
+    setTimeout() {}, location,
+    history: {
+      replaceState(_state, _title, hash) { location.hash = hash; },
+      pushState(_state, _title, hash) { location.hash = hash; },
+    }, navigator: {clipboard: {writeText: async () => {}}},
     crypto: {randomUUID},
     sessionStorage: storage,
-    FormData: class {constructor(form) { return Object.entries(form.values); }},
+    FormData: class {
+      constructor(form) { this.entries = Object.entries(form.values).flatMap(([key, value])=>Array.isArray(value)?value.map(item=>[key,item]):[[key,value]]); }
+      [Symbol.iterator]() { return this.entries[Symbol.iterator](); }
+      getAll(key) { return this.entries.filter(([name])=>name===key).map(([,value])=>value); }
+    },
   });
   const ready = application.start();
   const next = path => {
@@ -75,7 +83,7 @@ function browserFixture(storage = browserStorage()) {
   };
   const signIn = async (profile = memberProfile) => {
     await settle(next('/api/me'), profile);
-    if (profile.operator) await settle(next('/api/dashboard'), dashboard);
+    if (profile.operator && location.hash === '#dashboard') await settle(next('/api/dashboard'), dashboard);
     await ready;
   };
   const click = dataset => listeners.click({target: {closest: () => ({dataset, isConnected: false})}});
@@ -83,12 +91,98 @@ function browserFixture(storage = browserStorage()) {
     const submit = {disabled: false, isConnected: true};
     return {
       dataset: {form: kind, ...(tenant ? {tenantId: tenant} : {})}, values,
-      querySelector: () => submit, reset() { this.values = {}; },
+      querySelector: selector => selector === 'button' ? submit : selector === '[data-languages]' && Array.isArray(values.languages) ? {} : null,
+      reset() { this.values = {}; },
     };
   };
   const submit = form => listeners.submit({target: form, preventDefault() {}});
-  return {application, root, pending, message, next, settle, fail, signIn, click, form, submit, ready};
+  return {application, root, pending, message, next, settle, fail, signIn, click, form, submit, ready, location};
 }
+
+const connections = {
+  can_manage: true, default_model: 'default-model', provider_base_url:'https://example.com/v1',
+  credentials: [{alias:'main',base_url:'https://provider.example/v1',default_model:'model-one',source:'admin'}],
+};
+
+test('provider list links to a separate editor, saves changes, and returns to the refreshed table', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const listing = app.application.providerPage();
+  await app.settle(app.next('/api/provider-credentials'), connections);
+  await listing;
+  assert.match(app.root.innerHTML, /<table class="connections-table">/);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="provider"/);
+  const edit = app.click({editProvider:'main'});
+  await app.settle(app.next('/api/provider-credentials'), connections);
+  await edit;
+  assert.equal(app.location.hash,'#providers/main/edit');
+  assert.match(app.root.innerHTML,/data-mode="edit"/);
+  assert.match(app.root.innerHTML,/name="alias" value="main" readonly/);
+  const save = app.submit(app.form('provider',{alias:'main',base_url:'https://provider.example/v1',default_model:'model-two',key:''}));
+  const request = app.next('/api/provider-credentials/main');
+  assert.equal(request.options.method,'PUT');
+  assert.deepEqual(JSON.parse(request.options.body),{base_url:'https://provider.example/v1',default_model:'model-two'});
+  await app.settle(request,{ok:true});
+  await app.settle(app.next('/api/provider-credentials'),{...connections,credentials:[{...connections.credentials[0],default_model:'model-two'}]});
+  await save;
+  assert.equal(app.location.hash,'#providers');
+  assert.match(app.root.innerHTML,/model-two/);
+  assert.doesNotMatch(app.root.innerHTML,/data-form="provider"/);
+});
+
+test('new connection uses create semantics and preserves the form on duplicate-name rejection', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const open = app.click({action:'provider-new'});
+  await app.settle(app.next('/api/provider-credentials'),connections);
+  await open;
+  assert.equal(app.location.hash,'#providers/new');
+  assert.match(app.root.innerHTML,/data-mode="create"/);
+  const form = app.form('provider',{alias:'main',base_url:'https://provider.example/v1',default_model:'model-two',key:'test-key'});
+  form.dataset.mode='create';
+  const save = app.submit(form);
+  const request = app.next('/api/provider-credentials/main');
+  assert.equal(request.options.method,'POST');
+  await app.settle(request,{error:{message:'Подключение уже существует'}},409);
+  await save;
+  assert.equal(form.values.default_model,'model-two');
+  assert.match(app.message.textContent,/уже существует/);
+  assert.equal(app.location.hash,'#providers/new');
+});
+
+test('a provider editor deep link survives reload and a late editor response cannot replace help', async () => {
+  const app = browserFixture(browserStorage(),'#providers/main/edit');
+  await app.settle(app.next('/api/me'),operatorProfile);
+  await app.settle(app.next('/api/provider-credentials'),connections);
+  await app.ready;
+  assert.match(app.root.innerHTML, /Подключение: main/);
+  const editor = app.application.providerEditorPage('main');
+  const pending = app.next('/api/provider-credentials');
+  const help = app.application.helpPage();
+  await app.settle(app.next('/api/downloads'),{files:[]});
+  await help;
+  await app.settle(pending,connections);
+  await editor;
+  assert.match(app.root.innerHTML, /<h1>Установка и помощь<\/h1>/);
+});
+
+test('workspace list has no metrics and language selections persist all checked values', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const home = app.application.home();
+  await app.settle(app.next('/api/tenants'),{tenants:[],connections:connections.credentials,credentials:['main']});
+  await home;
+  assert.doesNotMatch(app.root.innerHTML,/class="metric"/);
+  for (const code of ['bn','hi','zh']) assert.match(app.root.innerHTML,new RegExp(`name="languages" value="${code}" checked`));
+  const form = app.form('settings',{languages:['ru','en','bn','hi','zh']},'A');
+  const save = app.submit(form);
+  const request = app.next('/api/tenants/A');
+  assert.deepEqual(JSON.parse(request.options.body).languages,['ru','en','bn','hi','zh']);
+  await app.settle(request,{ok:true});
+  await save;
+  await app.submit(app.form('settings',{languages:[]},'A'));
+  assert.match(app.message.textContent,/Выберите хотя бы один язык/);
+});
 
 test('a successful profile response arriving after another request expires the session cannot reopen the cabinet', async () => {
   const app = browserFixture();

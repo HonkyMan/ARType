@@ -25,6 +25,8 @@ export function installActions({
       const data = element.dataset;
       if (data.tenant) {
         await navigation.openTenant(data.tenant, 'team');
+      } else if (data.editProvider) {
+        await navigation.providerEditorPage(data.editProvider);
       } else if (data.productMember) {
         await api.request(`/api/tenants/${data.memberTenant}/members/${data.productMember}`, 'PATCH', {
           product_enabled: data.product === 'true',
@@ -84,6 +86,7 @@ export function installActions({
       case 'dashboard': return navigation.dashboardPage();
       case 'home': return navigation.home();
       case 'provider': return navigation.providerPage();
+      case 'provider-new': return navigation.providerEditorPage();
       case 'refresh': return navigation.start();
       case 'admins': return navigation.adminsPage();
       case 'help': return navigation.helpPage();
@@ -103,6 +106,7 @@ export function installActions({
           const section = action.slice('section:'.length);
           if (['team', 'settings', 'usage', 'billing'].includes(section)) {
             state.section = section;
+            history.pushState({}, '', `#tenants/${encodeURIComponent(state.current)}/${section}`);
             views.renderTenant();
           }
         }
@@ -146,11 +150,15 @@ export function installActions({
     form.dataset.submitting = 'true';
     submit.disabled = true;
     try {
-      const values = Object.fromEntries(new FormData(form));
+      const formData = new FormData(form);
+      const values = Object.fromEntries(formData);
       for (const key of ['seats', 'monthly_characters', 'max_text', 'rpm', 'concurrency']) {
         if (key in values) values[key] = Number(values[key]);
       }
-      if ('languages' in values) values.languages = values.languages.split(',').map(value => value.trim()).filter(Boolean);
+      if (form.querySelector('[data-languages]')) {
+        values.languages = formData.getAll('languages');
+        if (!values.languages.length) throw new Error('Выберите хотя бы один язык перевода.');
+      }
       if ('access_until' in values) values.access_until = values.access_until ? new Date(values.access_until).toISOString() : null;
       await submitForm(form, values, tenant, ticket);
     } catch (error) {
@@ -189,7 +197,7 @@ export function installActions({
       case 'provider': {
         const {alias, ...connection} = values;
         if (!connection.key) delete connection.key;
-        await api.request('/api/provider-credentials/' + encodeURIComponent(alias), 'PUT', connection);
+        await api.request('/api/provider-credentials/' + encodeURIComponent(alias), form.dataset.mode === 'create' ? 'POST' : 'PUT', connection);
         form.reset();
         if (state.isCurrent(ticket)) await navigation.providerPage();
         views.toast('Подключение сохранено');
