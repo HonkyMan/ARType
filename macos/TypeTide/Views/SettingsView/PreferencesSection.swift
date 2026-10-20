@@ -8,12 +8,10 @@ import SwiftUI
 enum PreferencesSection: String, CaseIterable, Identifiable {
     case general = "Аккаунт"
     case behavior = "Поведение"
-    case backend = "Backend"
     case language = "Языки"
     case shortcuts = "Горячие клавиши"
     case skipApps = "Исключения"
     case diagnostics = "Диагностика"
-    case about = "About"
 
     var id: String { rawValue }
 
@@ -21,12 +19,10 @@ enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape.fill"
         case .behavior: return "wand.and.stars"
-        case .backend: return "server.rack"
         case .language: return "globe"
         case .shortcuts: return "keyboard.fill"
         case .skipApps: return "nosign"
         case .diagnostics: return "waveform.path.ecg"
-        case .about: return "info.circle.fill"
         }
     }
 
@@ -35,12 +31,10 @@ enum PreferencesSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return .blue
         case .behavior: return .purple
-        case .backend: return .teal
         case .language: return .green
         case .shortcuts: return .pink
         case .skipApps: return .red
         case .diagnostics: return .purple
-        case .about: return .gray
         }
     }
 }

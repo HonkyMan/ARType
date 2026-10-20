@@ -7,7 +7,7 @@ final class DiagnosticsPrivacyTests: XCTestCase {
         let event = DiagnosticEvent(
             name: .translation,
             outcome: "failure",
-            backend: "ollama",
+            backend: "artype",
             captureMethod: "accessibility",
             errorCategory: "network",
             firstTokenMilliseconds: 120,

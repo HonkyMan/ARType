@@ -2,142 +2,144 @@
 #include "Clipboard.h"
 #include "Keyboard.h"
 #include "LocalDiagnostics.h"
-#include "Util.h"
-#include <thread>
+#include "SelectionCapture.h"
+#include "WorkerPool.h"
+#include <objbase.h>
+#include <atomic>
 
 namespace replacer {
-
 namespace {
-
 constexpr wchar_t kOwnerClass[] = L"ARTypeClipboardOwner";
+std::atomic<uint64_t> generation{0};
 
 struct RenderContext {
     const std::wstring* text = nullptr;
     bool rendered = false;
+    DWORD sequence = 0;
+    uint64_t generation = 0;
 };
 
-void serveText(const std::wstring& text) {
-    size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (!h) return;
-    if (void* p = GlobalLock(h)) {
-        memcpy(p, text.c_str(), bytes);
-        GlobalUnlock(h);
-        if (!SetClipboardData(CF_UNICODETEXT, h)) GlobalFree(h);
-    } else {
-        GlobalFree(h);
-    }
+bool serveText(const std::wstring& text) {
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory) return false;
+    void* data = GlobalLock(memory);
+    if (!data) { GlobalFree(memory); return false; }
+    memcpy(data, text.c_str(), bytes);
+    GlobalUnlock(memory);
+    if (!SetClipboardData(CF_UNICODETEXT, memory)) { GlobalFree(memory); return false; }
+    return true;
 }
 
-LRESULT CALLBACK ownerProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    auto* ctx = (RenderContext*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-    switch (msg) {
-    case WM_RENDERFORMAT:
-        // 目标应用 GetClipboardData → 粘贴真正发生了
-        if (ctx && ctx->text && wp == CF_UNICODETEXT) {
-            serveText(*ctx->text);
-            ctx->rendered = true;
-        }
-        return 0;
-    case WM_RENDERALLFORMATS:
-        if (ctx && ctx->text && OpenClipboard(hwnd)) {
-            if (GetClipboardOwner() == hwnd) serveText(*ctx->text);
-            CloseClipboard();
-            ctx->rendered = true;
+LRESULT CALLBACK ownerProc(HWND window, UINT message, WPARAM format, LPARAM parameter) {
+    auto* context = reinterpret_cast<RenderContext*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_RENDERFORMAT && context && context->text && format == CF_UNICODETEXT &&
+        context->generation == generation.load()) {
+        if (serveText(*context->text)) {
+            context->rendered = true;
+            context->sequence = GetClipboardSequenceNumber();
         }
         return 0;
     }
-    return DefWindowProcW(hwnd, msg, wp, lp);
+    // Never materialize a pending confidential translation during teardown.
+    if (message == WM_RENDERALLFORMATS) return 0;
+    return DefWindowProcW(window, message, format, parameter);
 }
 
-/// 工作线程主体：设置延迟渲染剪贴板 → 合成粘贴 → 等目标取数据 → 还原剪贴板
-void replaceWorker(const std::wstring& text, bool selectAll) {
-    DWORD started = GetTickCount();
-    // Also guard shortcut-driven replacement while a mouse button is held.
-    // A timeout must cancel, never inject into an unfinished click.
-    DWORD mouseDeadline = GetTickCount() + 2000;
+replacement::Result replaceWorker(const std::wstring& text, bool selectAll,
+                                 const std::optional<replacement::Snapshot>& target, uint64_t request) {
+    const auto cancelled = [request] { return generation.load() != request; };
+    if (cancelled()) return replacement::Result::Cancelled;
+    if (!target) return replacement::Result::TargetChanged;
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(apartment)) return replacement::Result::Failed;
+    struct Apartment { ~Apartment() { CoUninitialize(); } } apartmentLifetime;
+    const ULONGLONG deadline = GetTickCount64() + 2000;
     while (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
-        if (GetTickCount() >= mouseDeadline) {
-            diagnostics::Record("replacement", "failure", {}, {}, "mouseStillPressed",
-                                -1, (int)(GetTickCount() - started), (int)text.size());
-            return;
-        }
+        if (cancelled()) return replacement::Result::Cancelled;
+        if (GetTickCount64() >= deadline) return replacement::Result::Failed;
         Sleep(5);
     }
-    Sleep(20);
-    clipboard::Snapshot saved = clipboard::Take();
-
-    static bool registered = [] {
-        WNDCLASSW wc{};
-        wc.lpfnWndProc = ownerProc;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = kOwnerClass;
-        RegisterClassW(&wc);
-        return true;
+    static const bool registered = [] {
+        WNDCLASSW cls{};
+        cls.lpfnWndProc = ownerProc;
+        cls.hInstance = GetModuleHandleW(nullptr);
+        cls.lpszClassName = kOwnerClass;
+        return RegisterClassW(&cls) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }();
-    (void)registered;
-
-    RenderContext ctx;
-    ctx.text = &text;
+    if (!registered) return replacement::Result::Failed;
     HWND owner = CreateWindowExW(0, kOwnerClass, L"", 0, 0, 0, 0, 0,
-                                 HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
-    bool delayed = false;
-    if (owner) {
-        SetWindowLongPtrW(owner, GWLP_USERDATA, (LONG_PTR)&ctx);
-        if (OpenClipboard(owner)) {
-            EmptyClipboard();
-            SetClipboardData(CF_UNICODETEXT, nullptr);  // 延迟渲染
+                                HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!owner) return replacement::Result::Failed;
+    struct Window {
+        HWND handle;
+        ~Window() { SetWindowLongPtrW(handle, GWLP_USERDATA, 0); DestroyWindow(handle); }
+    } ownerLifetime{owner};
+    RenderContext render{&text, false, 0, request};
+    SetWindowLongPtrW(owner, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&render));
+    clipboard::Snapshot saved;
+    const replacement::Actions actions{
+        [&](bool afterSelectAll) { return capture::VerifyReplacementTarget(*target, afterSelectAll); },
+        cancelled,
+        [&] {
+            saved = clipboard::Take();
+            if (!saved.valid || !OpenClipboard(owner)) return false;
+            // Recheck under the clipboard lock before replacing its contents.
+            if (GetClipboardSequenceNumber() != saved.sequence || cancelled()) { CloseClipboard(); return false; }
+            if (!EmptyClipboard()) { CloseClipboard(); return false; }
+            SetClipboardData(CF_UNICODETEXT, nullptr);
+            render.sequence = GetClipboardSequenceNumber();
+            const bool prepared = IsClipboardFormatAvailable(CF_UNICODETEXT) != FALSE;
             CloseClipboard();
-            delayed = true;
-        }
-    }
-    if (!delayed) {
-        // 兜底：老式直接写 + 固定延迟
-        clipboard::SetText(text);
-    }
-
-    if (selectAll) {
-        keyboard::SendSelectAll();
-        Sleep(40);
-    }
-    keyboard::SendPaste();
-
-    if (delayed) {
-        // 泵消息等 WM_RENDERFORMAT；2s 没人取说明粘贴没发生（目标不收粘贴等）
-        DWORD deadline = GetTickCount() + 2000;
-        MSG m;
-        while (!ctx.rendered) {
-            DWORD now = GetTickCount();
-            if (now >= deadline) break;
-            MsgWaitForMultipleObjects(0, nullptr, FALSE, deadline - now, QS_ALLINPUT);
-            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&m);
-                DispatchMessageW(&m);
+            if (!prepared) clipboard::RestoreIfUnchanged(saved, render.sequence, owner);
+            return prepared;
+        },
+        [&] { return GetClipboardOwner() == owner && GetClipboardSequenceNumber() == render.sequence; },
+        [] { return keyboard::SendSelectAll(); },
+        [] { return keyboard::SendPaste(); },
+        [] { Sleep(40); },
+        [&] {
+            const ULONGLONG end = GetTickCount64() + 2000;
+            while (!render.rendered && !cancelled() && GetTickCount64() < end) {
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, 20, QS_ALLINPUT);
+                MSG message;
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
             }
-        }
-        util::Log("replace rendered=%d", ctx.rendered);
-        // 渲染后小宽限：有些目标会紧接着再读一次
-        if (ctx.rendered) Sleep(150);
-    } else {
-        Sleep(150);
-    }
-
-    clipboard::Restore(saved);
-    diagnostics::Record("replacement", delayed && !ctx.rendered ? "failure" : "success",
-                        {}, {}, delayed && !ctx.rendered ? "pasteNotConsumed" : "",
-                        -1, (int)(GetTickCount() - started), (int)text.size());
-    if (owner) {
-        SetWindowLongPtrW(owner, GWLP_USERDATA, 0);
-        DestroyWindow(owner);
-    }
+            if (render.rendered) Sleep(150);
+        },
+        [&] { clipboard::RestoreIfUnchanged(saved, render.sequence, owner); }
+    };
+    auto result = replacement::Perform(selectAll, actions);
+    if (result == replacement::Result::Replaced && !render.rendered) result = replacement::Result::Failed;
+    return result;
+}
 }
 
-} // namespace
+void CancelAll() { ++generation; }
 
-void ReplaceAsync(std::wstring text, bool selectAll) {
-    std::thread([text = std::move(text), selectAll] {
-        replaceWorker(text, selectAll);
-    }).detach();
+void ReplaceAsync(std::wstring text, bool selectAll, std::optional<replacement::Snapshot> target,
+                  std::function<void(replacement::Result)> completion) {
+    const auto request = generation.load();
+    const auto failed = [completion](std::exception_ptr) {
+        diagnostics::Record("replacement", "failure", {}, {}, "worker");
+        if (completion) completion(replacement::Result::Failed);
+    };
+    const auto rejected = completion;
+    const bool accepted = workers::Shared().submit(
+        [text = std::move(text), selectAll, target = std::move(target), request,
+                 completion = std::move(completion)](std::stop_token stop) {
+        std::stop_callback onStop(stop, [] { CancelAll(); });
+        const auto started = GetTickCount64();
+        const auto result = replaceWorker(text, selectAll, target, request);
+        diagnostics::Record("replacement", result == replacement::Result::Replaced ? "success" :
+                            result == replacement::Result::Cancelled ? "cancelled" : "failure",
+                            {}, {}, result == replacement::Result::Replaced ? "" : "destinationUnavailable",
+                            -1, static_cast<int>(GetTickCount64() - started), static_cast<int>(text.size()));
+        if (completion) completion(result);
+    }, failed);
+    if (!accepted && rejected) rejected(replacement::Result::Failed);
 }
-
-} // namespace replacer
+}

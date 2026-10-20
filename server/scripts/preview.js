@@ -1,7 +1,7 @@
 // Isolated browser QA fixture. Never imported by the production entry point.
 import pg from 'pg';
 import { createApp } from '../src/app.js';
-import { migrate } from '../src/store.js';
+import { migrate } from '../src/migrations.js';
 if(process.env.ARTYPE_TEST_PREVIEW!=='1' || !process.env.TEST_DATABASE_URL?.endsWith('/artype_preview'))throw new Error('Use a dedicated artype_preview database and ARTYPE_TEST_PREVIEW=1');
 const pool=new pg.Pool({connectionString:process.env.TEST_DATABASE_URL});await migrate(pool);
 const port=Number(process.env.PORT||8081);

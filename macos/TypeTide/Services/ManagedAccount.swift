@@ -5,11 +5,7 @@ import Foundation
 
 enum ManagedProtocol {
     static func origin(_ value: String) -> URL? {
-        guard let u=URLComponents(string: value), let host=u.host,
-              u.user == nil, u.password == nil, u.query == nil, u.fragment == nil,
-              u.path.isEmpty || u.path == "/",
-              u.scheme == "https" || (u.scheme == "http" && ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host)) else { return nil }
-        return u.url
+        ManagedEndpoint.canonicalOrigin(value).flatMap(URL.init(string:))
     }
     static func body(_ request: TranslationRequest, tenant: String) throws -> Data {
         var b: [String: Any] = ["text":request.text,"target":request.target.rawValue,
@@ -18,36 +14,25 @@ enum ManagedProtocol {
         return try JSONSerialization.data(withJSONObject:b)
     }
     static func translation(_ data: Data) throws -> String {
-        let lines=String(decoding:data,as:UTF8.self).components(separatedBy:.newlines)
-        guard lines.contains(where:{$0.trimmingCharacters(in:.whitespaces)=="data: [DONE]"}) else {
-            throw TranslationError.network("Перевод прерван. Исходный текст сохранён.")
+        do {
+            return try ManagedResponse.translation(data)
+        } catch let error as ManagedResponseError {
+            if case .empty = error { throw TranslationError.empty }
+            throw TranslationError.network(error.localizedDescription)
         }
-        let result=lines.compactMap { OpenAISSEDecoder.content(from:$0) }.joined()
-        guard !result.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw TranslationError.empty }
-        return result
     }
-}
-
-private final class ManagedNoRedirect: NSObject, URLSessionTaskDelegate {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
 enum ManagedAPI {
     static var base: URL? {
-        guard let path=Bundle.main.url(forResource:"managed-config",withExtension:"json"),
-              let data=try? Data(contentsOf:path),
-              let b=try? JSONSerialization.jsonObject(with:data) as? [String:String],
-              let value=b["service_url"] else { return nil }
-        return ManagedProtocol.origin(value)
+        ManagedEndpoint.configuredOrigin.flatMap(URL.init(string:))
     }
-    static let session=URLSession(configuration:.ephemeral,delegate:ManagedNoRedirect(),delegateQueue:nil)
     static func request(_ path: String, method: String="GET", body: Data?=nil, token: String="") async throws -> (Data,Int) {
         guard let base else { throw TranslationError.notConfigured("Адрес сервиса ARType не настроен. Получите установщик у администратора.") }
         var r=URLRequest(url:base.appendingPathComponent(path)); r.httpMethod=method;r.httpBody=body;r.timeoutInterval=60
         r.setValue("application/json",forHTTPHeaderField:"Content-Type")
         if !token.isEmpty { r.setValue("Bearer \(token)",forHTTPHeaderField:"Authorization") }
-        let (data,response)=try await session.data(for:r)
+        let (data,response)=try await ManagedTransport.data(for:r)
         let status=(response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status) else {
             let b=try? JSONSerialization.jsonObject(with:data) as? [String:Any]
@@ -86,6 +71,7 @@ final class ManagedAccount: ObservableObject {
     @Published var showAccessNotice=false
     @Published var selected: String=UserDefaults.standard.string(forKey:"artype.organization") ?? "" {
         didSet {
+            translationContextID = UUID()
             TriggerController.shared.cancelTranslations()
             UserDefaults.standard.set(selected,forKey:"artype.organization")
             alignLanguages()
@@ -93,8 +79,9 @@ final class ManagedAccount: ObservableObject {
         }
     }
     private var loginTask: Task<Void,Never>?
+    private(set) var translationContextID = UUID()
     fileprivate var generation=UUID()
-    var token: String { Credentials.cloudAPIKey() }
+    var token: String { Credentials.sessionToken() }
     var signedIn: Bool { !token.isEmpty }
     var allowedLanguages:[Language] {
         organizations.first(where:{$0.id==selected})?.languages.compactMap(Language.init(rawValue:)) ?? [.russian,.english]
@@ -125,6 +112,7 @@ final class ManagedAccount: ObservableObject {
         }catch { if generation==current {message=error.localizedDescription} }
     }
     func login() {
+        translationContextID = UUID()
         loginTask?.cancel();generation=UUID();let current=generation
         busy=true;message="";code=""
         loginTask=Task {
@@ -138,8 +126,8 @@ final class ManagedAccount: ObservableObject {
                 let (data,_)=try await ManagedAPI.json("api/device/start",body:["challenge":challenge])
                 let start=try JSONDecoder().decode(Start.self,from:data)
                 guard generation==current, !Task.isCancelled else {return}
-                guard let url=URL(string:start.login_url), let base=ManagedAPI.base,
-                      url.scheme==base.scheme,url.host==base.host,url.port==base.port else {throw TranslationError.network("Сервис вернул неверный адрес входа.")}
+                guard let url=URL(string:start.login_url), let expected=ManagedEndpoint.configuredOrigin,
+                      ManagedEndpoint.loginURLAllowed(url,origin:expected) else {throw TranslationError.network("Сервис вернул неверный адрес входа.")}
                 code=start.code
                 guard NSWorkspace.shared.open(url) else {throw TranslationError.network("Не удалось открыть системный браузер.")}
                 for _ in 0..<100 {
@@ -148,7 +136,8 @@ final class ManagedAccount: ObservableObject {
                     guard generation==current else {return}
                     if status==200 {
                         struct Grant:Decodable{let token:String};let grant=try JSONDecoder().decode(Grant.self,from:result)
-                        guard Credentials.saveCloudAPIKey(grant.token) else {throw TranslationError.notConfigured("Не удалось сохранить сессию в Связке ключей.")}
+                        guard Credentials.saveSessionToken(grant.token) else {throw TranslationError.notConfigured("Не удалось сохранить сессию в Связке ключей.")}
+                        translationContextID = UUID()
                         await refresh();return
                     }
                 }
@@ -156,12 +145,12 @@ final class ManagedAccount: ObservableObject {
             }catch is CancellationError {}catch {if generation==current{message=error.localizedDescription}}
         }
     }
-    func cancelLogin() {generation=UUID();loginTask?.cancel();loginTask=nil;busy=false;code=""}
+    func cancelLogin() {translationContextID=UUID();generation=UUID();loginTask?.cancel();loginTask=nil;busy=false;code=""}
     func logout() async {
         TriggerController.shared.cancelTranslations()
         cancelLogin();let old=token
         // Clearing local credentials is mandatory even when the server cannot be reached.
-        guard Credentials.saveCloudAPIKey("") else {message="Не удалось удалить сессию из Связки ключей.";return}
+        guard Credentials.saveSessionToken("") else {message="Не удалось удалить сессию из Связки ключей.";return}
         generation=UUID();email="";organizations=[];selected="";message="";accessNotice="";showAccessNotice=false
         if !old.isEmpty {
             do {_=try await ManagedAPI.json("api/logout",body:[:],token:old)}

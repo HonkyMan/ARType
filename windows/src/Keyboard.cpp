@@ -40,7 +40,7 @@ std::vector<INPUT> buildCtrlComboInputs(
 
 } // namespace
 
-void SendCtrlCombo(WORD vk) {
+bool SendCtrlCombo(WORD vk) {
     std::vector<WORD> held;
     const WORD holdable[] = {
         VK_LMENU, VK_RMENU, VK_LSHIFT, VK_RSHIFT, VK_LWIN, VK_RWIN,
@@ -54,6 +54,7 @@ void SendCtrlCombo(WORD vk) {
     if (sent != seq.size())
         util::Log("SendCtrlCombo vk=%u sent=%u/%zu error=%lu", vk, sent, seq.size(),
                   GetLastError());
+    return sent == seq.size();
 }
 
 } // namespace keyboard

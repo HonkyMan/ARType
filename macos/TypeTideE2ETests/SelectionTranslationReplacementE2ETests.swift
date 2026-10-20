@@ -50,7 +50,11 @@ final class SelectionTranslationReplacementE2ETests: XCTestCase {
             text: (editor.string as NSString).substring(with: editor.selectedRange()),
             element: nil,
             range: nil,
-            dismissOnInteraction: false
+            dismissOnInteraction: false,
+            replacementTarget: ReplacementTarget { _ in
+                editor.selectedRange() == selected &&
+                    editor.string == "前缀 你好世界 后缀"
+            }
         )
 
         XCTAssertTrue(PopupController.shared.isVisible)
@@ -91,5 +95,51 @@ final class SelectionTranslationReplacementE2ETests: XCTestCase {
         XCTAssertTrue(PopupController.shared.isVisible)
         ManagedAccount.shared.selected = UUID().uuidString
         XCTAssertFalse(PopupController.shared.isVisible)
+    }
+
+    func testChangedSelectionKeepsCompletedTranslationForManualCopy() async throws {
+        let oldNative = LanguageConfig.sourceLanguage
+        let oldForeign = LanguageConfig.targetLanguage
+        defer { LanguageConfig.sourceLanguage = oldNative; LanguageConfig.targetLanguage = oldForeign }
+        LanguageConfig.sourceLanguage = .chinese
+        LanguageConfig.targetLanguage = .english
+        TranslationService.shared.providerOverride = MockStreamingProvider()
+        var originalSelectionStillFocused = true
+        var editor = "你好世界"
+        TextReplacer.replacementOverride = { value, _ in editor = value }
+        TriggerController.shared.presentRead(text: editor, element: nil, range: nil,
+            dismissOnInteraction: false,
+            replacementTarget: ReplacementTarget { _ in originalSelectionStillFocused })
+        let model = try XCTUnwrap(PopupController.shared.currentModel)
+        try await waitUntil("translation") { model.translation == "MOCK_TRANSLATION_OK" }
+        originalSelectionStillFocused = false
+        model.onReplace?()
+        try await waitUntil("manual copy fallback") {
+            PopupController.shared.currentModel?.replacementNotice != nil
+        }
+        let fallback = try XCTUnwrap(PopupController.shared.currentModel)
+        XCTAssertEqual(editor, "你好世界")
+        XCTAssertEqual(fallback.translation, "MOCK_TRANSLATION_OK")
+        XCTAssertNil(fallback.onReplace)
+        XCTAssertNotNil(fallback.onCopy)
+        XCTAssertNil(fallback.errorText)
+    }
+
+    func testNewReadInvalidatesPreviousPopupReplacement() async throws {
+        TranslationService.shared.providerOverride = MockStreamingProvider()
+        var editor = "你好世界"
+        TextReplacer.replacementOverride = { value, _ in editor = value }
+        let destination = ReplacementTarget { _ in true }
+        TriggerController.shared.presentRead(text: editor, element: nil, range: nil,
+            targetOverride: .english, dismissOnInteraction: false, replacementTarget: destination)
+        let previous = try XCTUnwrap(PopupController.shared.currentModel)
+        try await waitUntil("previous translation") { previous.translation == "MOCK_TRANSLATION_OK" }
+        TriggerController.shared.presentRead(text: editor, element: nil, range: nil,
+            targetOverride: .english, dismissOnInteraction: false, replacementTarget: destination)
+        let current = try XCTUnwrap(PopupController.shared.currentModel)
+        previous.onReplace?()
+        try await waitUntil("current translation") { current.translation == "MOCK_TRANSLATION_OK" }
+        XCTAssertEqual(editor, "你好世界")
+        XCTAssertTrue(PopupController.shared.currentModel === current)
     }
 }

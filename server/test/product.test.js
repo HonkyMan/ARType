@@ -6,7 +6,8 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import { createApp } from '../src/app.js';
-import { migrate,transaction } from '../src/store.js';
+import { migrate } from '../src/migrations.js';
+import { transaction } from '../src/database.js';
 import {billingPeriod,reconcileTenantBilling,productAccess} from '../src/billing.js';
 
 const pool = new pg.Pool({connectionString: process.env.TEST_DATABASE_URL});
@@ -81,7 +82,7 @@ test('connection metadata routes each tenant and changing destinations requires 
   assert.equal(upstreamCalls.at(-1).model,'chosen-model');
   assert.equal(upstreamCredentials.at(-1),'new-provider-key');
   assert.equal((await call(path,{actor:op,method:'PUT',body:{base_url:'https://other.example/v1'}})).status,422);
-  for(const base_url of ['http://unsafe.example/v1','https://user:password@provider.example/v1','https://provider.example/v1?token=secret','https://provider.example/v1#fragment']){
+  for(const base_url of ['http://unsafe.example/v1','https://user:password@provider.example/v1','https://provider.example/v1?token=secret','https://provider.example/v1#fragment','https://provider.example/v1?','https://provider.example/v1#']){
     assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'key',base_url}})).status,422);
   }
   const listing=await call('/api/provider-credentials',{actor:op});
@@ -108,6 +109,27 @@ test('published installer downloads require login and expose only manifest-liste
   assert.equal((await call('/downloads/manifest.json',{actor:member})).status,404);
   await rm(join(config.downloadDirectory,'manifest.json'));
   assert.deepEqual((await call('/api/downloads',{actor:member})).data.files,[]);
+});
+
+test('saving a legacy noncanonical provider URL preserves its key when the destination is unchanged', async () => {
+  const op = await actor('operator@example.com');
+  const path = '/api/provider-credentials/legacy';
+  assert.equal((await call(path, { actor: op, method: 'PUT', body: {
+    key: 'legacy-fixture-key', base_url: 'https://api.example.com/v1', default_model: 'old-model',
+  } })).status, 200);
+  await pool.query("UPDATE provider_credentials SET base_url='https://API.EXAMPLE.COM:443/v1' WHERE alias='legacy'");
+  const ciphertext = (await pool.query("SELECT ciphertext FROM provider_credentials WHERE alias='legacy'")).rows[0].ciphertext;
+  const saved = await call(path, { actor: op, method: 'PUT', body: {
+    base_url: 'https://API.EXAMPLE.COM:443/v1', default_model: 'new-model',
+  } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  const row = (await pool.query("SELECT * FROM provider_credentials WHERE alias='legacy'")).rows[0];
+  assert.equal(row.ciphertext, ciphertext);
+  assert.equal(row.default_model, 'new-model');
+  assert.equal(row.base_url, 'https://api.example.com/v1');
+  assert.equal((await call(path, { actor: op, method: 'PUT', body: {
+    base_url: 'https://different.example.com/v1',
+  } })).status, 422);
 });
 
 test('only platform administrators set prices and post idempotent balance entries; owners see their own balance',async()=>{
@@ -294,6 +316,40 @@ test('proxy enforces quota atomically and constructs provider prompt on server',
   assert.equal(rows.length,1); assert.equal(rows[0].characters,10);
   assert.ok(!JSON.stringify(rows).includes('1234567890')); assert.ok(!JSON.stringify(rows).includes('Hello world'));
 });
+test('usage time is taken after the tenant lock is granted, not when the transaction began', async () => {
+  const op = await actor('operator@example.com');
+  const owner = await actor('owner@example.com');
+  const organization = await tenant(op, 'owner@example.com');
+  const blocker = await pool.connect();
+  let request;
+  try {
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT id FROM tenants WHERE id=$1 FOR UPDATE', [organization.id]);
+    request = call('/api/translate', { actor: owner, method: 'POST', body: {
+      tenant_id: organization.id, request_id: randomUUID(), text: 'Привет', target: 'en',
+    } });
+    // Observe the actual blocked request rather than relying on a fixed sleep.
+    let waiting = false;
+    for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+      waiting = (await pool.query(`
+        SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+          AND wait_event_type='Lock' AND query LIKE '%FROM tenants WHERE id=$1%FOR UPDATE%'
+      `)).rowCount > 0;
+      if (!waiting) await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.ok(waiting, 'translation must be waiting on the tenant lock');
+    const releasedAt = (await blocker.query('SELECT clock_timestamp() AS time')).rows[0].time;
+    await blocker.query('COMMIT');
+    assert.equal((await request).status, 200);
+    const usage = (await pool.query('SELECT created_at FROM usage WHERE tenant_id=$1', [organization.id])).rows[0];
+    assert.ok(usage.created_at >= releasedAt, 'usage must belong to the month/rate window when access was granted');
+  } finally {
+    await blocker.query('ROLLBACK');
+    blocker.release();
+    if (request) await request;
+  }
+});
+
 test('blocked members, suspended tenants, forbidden languages and expired access cannot translate',async()=>{
   const op=await actor('operator@example.com'), a=await actor('a@example.com'); const t=await tenant(op,'a@example.com');
   const body={tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'de',style:'faithful'};

@@ -1,4 +1,6 @@
 #include "Http.h"
+#include "ResponseLimits.h"
+#include "RequestDeadline.h"
 #include <windows.h>
 #include <winhttp.h>
 #include <vector>
@@ -6,8 +8,6 @@
 namespace http {
 
 namespace {
-
-constexpr size_t kMaxBufferedResponse = 8 * 1024 * 1024;
 
 struct Handle {
     HINTERNET h = nullptr;
@@ -29,9 +29,10 @@ Result request(const std::wstring& url,
                const wchar_t* method,
                const std::string& body,
                const std::wstring& extraHeaders,
-               const std::function<void(const char*, size_t)>* onChunk,
                const std::atomic<bool>* cancel) {
     Result r;
+    const Deadline deadline;
+    if (cancel && cancel->load()) { r.error = "Cancelled"; return r; }
 
     URL_COMPONENTS uc{};
     uc.dwStructSize = sizeof(uc);
@@ -49,7 +50,10 @@ Result request(const std::wstring& url,
     if (!session) { r.error = lastError("WinHttpOpen"); return r; }
 
     // 连接失败应尽快可恢复；单次 90 秒无响应后让 UI 提供 Retry。
-    WinHttpSetTimeouts(session.h, 10000, 10000, 30000, 90000);
+    if (!WinHttpSetTimeouts(session.h, 10000, 10000, 30000, 90000)) {
+        r.error = lastError("Timeout configuration");
+        return r;
+    }
 
     Handle conn(WinHttpConnect(session.h, host, uc.nPort, 0));
     if (!conn) { r.error = lastError("WinHttpConnect"); return r; }
@@ -58,16 +62,34 @@ Result request(const std::wstring& url,
                                   WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                   secure ? WINHTTP_FLAG_SECURE : 0));
     if (!req) { r.error = lastError("WinHttpOpenRequest"); return r; }
+    const auto beforeIO = [&] {
+        if (cancel && cancel->load()) { r.error = "Cancelled"; return false; }
+        const int remaining = deadline.remaining();
+        if (!remaining) { r.error = "Request deadline exceeded"; return false; }
+        // Update the remaining budget between synchronous calls. Never close a
+        // synchronous handle from another thread while WinHTTP is using it.
+        if (!WinHttpSetTimeouts(req.h, std::min(remaining, 10000), std::min(remaining, 10000),
+                              std::min(remaining, 30000), std::min(remaining, 90000))) {
+            r.error = lastError("Timeout configuration");
+            return false;
+        }
+        return true;
+    };
     DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-    WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+    if (!WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy))) {
+        r.error = lastError("Redirect policy");
+        return r;
+    }
 
     std::wstring headers = L"Content-Type: application/json\r\n" + extraHeaders;
+    if (!beforeIO()) return r;
     if (!WinHttpSendRequest(req.h, headers.c_str(), (DWORD)headers.size(),
                             body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(),
                             (DWORD)body.size(), (DWORD)body.size(), 0)) {
         r.error = lastError("Connection");
         return r;
     }
+    if (!beforeIO()) return r;
     if (!WinHttpReceiveResponse(req.h, nullptr)) {
         r.error = lastError("Response");
         return r;
@@ -79,30 +101,29 @@ Result request(const std::wstring& url,
     r.status = (int)status;
 
     std::vector<char> buf(16 * 1024);
+    response::Budget responseBudget;
     for (;;) {
-        if (cancel && cancel->load()) { r.error = "Cancelled"; return r; }
+        if (!beforeIO()) return r;
         DWORD avail = 0;
         if (!WinHttpQueryDataAvailable(req.h, &avail)) { r.error = lastError("Read"); return r; }
         if (avail == 0) break;
         while (avail > 0) {
-            if (cancel && cancel->load()) { r.error = "Cancelled"; return r; }
+            if (!beforeIO()) return r;
             DWORD toRead = avail < buf.size() ? avail : (DWORD)buf.size();
             DWORD got = 0;
             if (!WinHttpReadData(req.h, buf.data(), toRead, &got)) { r.error = lastError("Read"); return r; }
             if (got == 0) break;
             avail -= got;
-            if (onChunk && status >= 200 && status < 300) {
-                (*onChunk)(buf.data(), got);
-            } else {
-                if (r.body.size() + got > kMaxBufferedResponse) {
-                    r.error = "Response too large";
-                    return r;
-                }
-                r.body.append(buf.data(), got);
+            if (!responseBudget.consume(got)) {
+                r.body.clear();
+                r.error = "Response too large";
+                return r;
             }
+            r.body.append(buf.data(), got);
         }
     }
 
+    if (!beforeIO()) return r;
     if (status < 200 || status >= 300) {
         char msg[64];
         snprintf(msg, sizeof(msg), "HTTP %lu", status);
@@ -115,18 +136,12 @@ Result request(const std::wstring& url,
 
 } // namespace
 
-Result PostStream(const std::wstring& url, const std::string& body,
-                  const std::wstring& extraHeaders,
-                  const std::function<void(const char*, size_t)>& onChunk,
-                  const std::atomic<bool>& cancel) {
-    return request(url, L"POST", body, extraHeaders, &onChunk, &cancel);
+Result Get(const std::wstring& url, const std::wstring& extraHeaders, const std::atomic<bool>* cancel) {
+    return request(url, L"GET", {}, extraHeaders, cancel);
 }
-
-Result Get(const std::wstring& url, const std::wstring& extraHeaders) {
-    return request(url, L"GET", {}, extraHeaders, nullptr, nullptr);
-}
-Result Post(const std::wstring& url, const std::string& body, const std::wstring& extraHeaders) {
-    return request(url, L"POST", body, extraHeaders, nullptr, nullptr);
+Result Post(const std::wstring& url, const std::string& body, const std::wstring& extraHeaders,
+            const std::atomic<bool>* cancel) {
+    return request(url, L"POST", body, extraHeaders, cancel);
 }
 
 } // namespace http

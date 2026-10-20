@@ -23,10 +23,15 @@ enum PasteboardHelper {
         return items
     }
 
-    static func restore(_ items: [NSPasteboardItem], to pb: NSPasteboard = .general) {
+    /// Never overwrite a copy performed after our temporary clipboard write.
+    @discardableResult
+    static func restore(_ items: [NSPasteboardItem], ifUnchangedSince changeCount: Int,
+                        to pb: NSPasteboard = .general) -> Bool {
+        guard pb.changeCount == changeCount else { return false }
         pb.clearContents()
         if !items.isEmpty {
-            pb.writeObjects(items)
+            return pb.writeObjects(items)
         }
+        return true
     }
 }

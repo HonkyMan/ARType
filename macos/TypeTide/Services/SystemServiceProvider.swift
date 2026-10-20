@@ -9,34 +9,59 @@ import AppKit
 import Foundation
 
 @MainActor
-class SystemServiceProvider: NSObject {
-    static let shared = SystemServiceProvider()
+final class SystemServiceProvider: NSObject {
+    private let environment: () -> ServiceTranslation.Environment
+    private let applicationIdentifiers: () -> [String]
+    private let makeWork: (ServiceTranslation.Request, @escaping () -> Void) -> ServiceTranslation.Work
+    private var task: Task<Void, Never>?
+    private var requestID = UUID()
 
-    override init() {
+    init(environment: @escaping () -> ServiceTranslation.Environment,
+         applicationIdentifiers: @escaping () -> [String],
+         makeWork: @escaping (ServiceTranslation.Request, @escaping () -> Void) -> ServiceTranslation.Work) {
+        self.environment = environment
+        self.applicationIdentifiers = applicationIdentifiers
+        self.makeWork = makeWork
         super.init()
-        NSApp.servicesProvider = self
     }
 
     // MARK: - Service Methods
 
-    /// 翻译选中文本到目标语言并写回剪贴板。
+    /// A send-only Services action: the popup is visible before this selector returns.
+    /// The asynchronous result is displayed there; the caller's pasteboard is read-only.
     @objc func translateSelection(_ pasteboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
-        guard let selectedText = pasteboard.string(forType: .string) else { return }
-        Task { @MainActor in
-            let translation = await translate(selectedText)
-            pasteboard.clearContents()
-            pasteboard.setString(translation, forType: .string)
+        let source = applicationIdentifiers()
+        guard let request = ServiceTranslation.prepare(pasteboard: pasteboard,
+            applicationIdentifiers: source, environment: environment()) else {
+            error.pointee = "ARType выключен, приложение исключено или текст пустой/длиннее 5000 символов."
+            return
+        }
+        cancel()
+        let work = makeWork(request) { [weak self] in self?.cancel() }
+        let id = UUID()
+        requestID = id
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let outcome = await ServiceTranslation.perform(request, pasteboard: pasteboard,
+                environment: environment, translate: work.translate)
+            guard requestID == id else {
+                work.close()
+                return
+            }
+            task = nil
+            switch outcome {
+            case .completed(let result): work.showResult(result)
+            case .failed: work.showError("Не удалось перевести текст. Повторите действие через меню Services.")
+            case .discarded: work.close()
+            }
         }
     }
 
     // MARK: - Helper
 
-    private func translate(_ text: String) async -> String {
-        do {
-            return try await TranslationService.shared.translateFully(
-                text: text, from: nil, to: LanguageConfig.targetLanguage)
-        } catch {
-            return text
-        }
+    private func cancel() {
+        requestID = UUID()
+        task?.cancel()
+        task = nil
     }
 }

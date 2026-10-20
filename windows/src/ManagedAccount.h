@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <string>
 #include <cstdint>
+#include <memory>
 #include "Json.h"
 
 namespace account {
@@ -13,4 +14,5 @@ void FetchProfile(HWND window,UINT message,const std::string& token);
 void Logout(HWND window,UINT message,const std::string& token);
 void Cancel();
 bool Current(unsigned generation);
+std::unique_ptr<Update> TakeUpdate(LPARAM identifier);
 }

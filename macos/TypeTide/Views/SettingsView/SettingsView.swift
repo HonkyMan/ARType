@@ -11,7 +11,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var selection: PreferencesSection = .general
-    @AppStorage(AppSettings.Keys.hasCompletedFirstLaunch) private var hasCompletedFirstLaunch = false
 
     var body: some View {
         HSplitView {
@@ -20,7 +19,7 @@ struct SettingsView: View {
                     HStack { Image("BrandMark").resizable().aspectRatio(contentMode:.fit).frame(width:30,height:30); Text("ARType").font(.title2.bold()) }
                     Text("Рабочий язык вашей команды").font(.caption).foregroundStyle(.secondary)
                 }.padding(16)
-                List(PreferencesSection.allCases.filter { $0 != .backend && $0 != .about }, selection: $selection) { section in
+                List(PreferencesSection.allCases, selection: $selection) { section in
                     Label {
                         Text(section.rawValue)
                     } icon: {
@@ -37,8 +36,6 @@ struct SettingsView: View {
                     ManagedAccountView()
                 case .behavior:
                     BehaviorSettingsView()
-                case .backend:
-                    ManagedAccountView()
                 case .language:
                     LanguageSettingsView()
                 case .shortcuts:
@@ -47,8 +44,6 @@ struct SettingsView: View {
                     SkipAppsSettingsView()
                 case .diagnostics:
                     DiagnosticsSettingsView()
-                case .about:
-                    AboutView()
                 }
         }
         .frame(minWidth: 780, minHeight: 560)

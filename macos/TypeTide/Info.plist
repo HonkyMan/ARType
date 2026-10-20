@@ -47,11 +47,6 @@
 			<string>translateSelection</string>
 			<key>NSPortName</key>
 			<string>ARType</string>
-			<key>NSReturnTypes</key>
-			<array>
-				<string>NSStringPboardType</string>
-				<string>public.utf8-plain-text</string>
-			</array>
 			<key>NSSendTypes</key>
 			<array>
 				<string>NSStringPboardType</string>

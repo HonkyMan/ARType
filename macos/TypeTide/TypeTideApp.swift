@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startTideDemoIfRequested()
 #endif
 
-        // 若配置的 Ollama 模型未安装，自动挑一个已装模型（避免开箱即败）
+        // Refresh the managed account before allowing product actions.
         Task { @MainActor in
             await ManagedAccount.shared.refresh()
             if !ManagedAccount.shared.accessNotice.isEmpty {SettingsOpener.open()}
@@ -87,7 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        // 自动检查更新
     }
 
     /// App 已在运行时被再次打开（Finder/启动台双击）：没有可见窗口就打开设置，
@@ -118,14 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildStatusMenu() {
         statusMenu.removeAllItems()
-
-        if UpdateChecker.shared.hasNewVersion {
-            let update = NSMenuItem(title: "New update available", action: #selector(openUpdate), keyEquivalent: "")
-            update.target = self
-            update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
-            statusMenu.addItem(update)
-            statusMenu.addItem(.separator())
-        }
 
         let enabled = NSMenuItem(title: AppSettings.isEnabled ? "ARType включён" : "ARType выключен",
                                  action: #selector(toggleEnabled), keyEquivalent: "")
@@ -163,7 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildStatusMenu()
     }
 
-    @objc private func openUpdate() { UpdateChecker.shared.openReleasesPage() }
     @objc private func openSettings() { SettingsOpener.open() }
     @objc private func quitApp() { NSApp.terminate(nil) }
 

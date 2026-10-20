@@ -1,17 +1,11 @@
-//
-//  Translator.h — 翻译服务：提示词、Ollama / OpenAI 兼容后端（流式）、LRU 缓存。
-//  对应 macOS 的 TranslationService + providers。
-//
-//  stream() 在工作线程执行，回调也在工作线程触发；
-//  UI 侧（App）负责用 PostMessage 转回主线程。缓存命中时回调在调用线程同步触发。
-//
+// Managed ARType translation. Callbacks run on the worker thread; the UI marshals
+// them through PostMessage. Every request is authorized by the configured server.
 #pragma once
 #include "Language.h"
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
-#include <vector>
 
 struct TranslationRequest {
     std::wstring text;
@@ -22,21 +16,10 @@ struct TranslationRequest {
 
 namespace translator {
 
-struct HealthCheckResult {
-    bool ok = false;
-    std::wstring message;
-    int firstTokenMs = -1;
-    int totalMs = 0;
-};
-
-/// 提示词构造（与 macOS TranslationPrompt 保持一致）
-std::string SystemPrompt(Language target, std::optional<Language> source, RewriteStyle style);
-std::string PlainPrompt(const std::wstring& text, Language target, std::optional<Language> source, RewriteStyle style);
-
 using DeltaFn = std::function<void(uint64_t reqId, const std::wstring& delta)>;
 using DoneFn = std::function<void(uint64_t reqId, bool ok, const std::wstring& error)>;
 
-/// 发起流式翻译，返回请求 id。命中缓存时同步回调全文 + 完成。
+/// Start a managed request. Only a complete, validated result is emitted.
 uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone);
 
 /// 取消某个请求（对应流式任务尽快退出，不再回调）
@@ -45,18 +28,7 @@ void Cancel(uint64_t reqId);
 /// 取消全部活跃请求（退出前调用）
 void CancelAll();
 
-/// 阻塞式完整翻译（改写直接替换用）。失败返回 nullopt 并填 error。
+/// Blocking managed translation for the explicit CLI self-test. Never used by the UI.
 std::optional<std::wstring> TranslateFully(const TranslationRequest& req, std::wstring* error);
-
-/// Async backend health check using fixed synthetic text. Invoke on the main thread so
-/// backend settings are snapshotted safely; completion runs on a worker thread.
-void CheckHealthAsync(std::function<void(HealthCheckResult)> completion);
-
-/// 测试钩子：清空缓存
-void ClearCacheForTesting();
-
-/// Pure streaming helpers shared by production parsing and contract self-tests.
-std::optional<std::wstring> ParseOpenAISSELine(const std::string& line);
-std::vector<std::string> AssembleLinesForTesting(const std::vector<std::string>& fragments);
 
 } // namespace translator

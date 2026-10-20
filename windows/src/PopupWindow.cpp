@@ -47,6 +47,7 @@ void PopupWindow::show(const std::wstring& original, Language target, RECT ancho
     original_ = original;
     translation_.clear();
     error_.clear();
+    replacementNotice_.clear();
     loading_ = true;
     copiedFlash_ = false;
     tidePhase_ = TidePhase::Waiting;
@@ -140,6 +141,11 @@ void PopupWindow::setError(const std::wstring& error) {
     InvalidateRect(hwnd_, nullptr, TRUE);
 }
 
+void PopupWindow::setReplacementNotice(const std::wstring& notice) {
+    replacementNotice_ = notice;
+    if (hwnd_) { layoutAndResize(); InvalidateRect(hwnd_, nullptr, TRUE); }
+}
+
 void PopupWindow::setTarget(Language target) {
     target_ = target;
     if (hwnd_) InvalidateRect(hwnd_, nullptr, TRUE);
@@ -149,6 +155,7 @@ void PopupWindow::resetForRetranslate() {
     if (!hwnd_) return;
     translation_.clear();
     error_.clear();
+    replacementNotice_.clear();
     loading_ = true;
     tidePhase_ = TidePhase::Waiting;
     tideTick_ = settleTicks_ = 0;
@@ -193,7 +200,7 @@ void PopupWindow::layoutAndResize() {
     HFONT old = (HFONT)SelectObject(dc, fontBody_);
     std::wstring bodyText = !error_.empty() ? error_
                           : (translation_.empty() && loading_) ? original_
-                          : translation_;
+                          : replacementNotice_.empty() ? translation_ : replacementNotice_ + L"\n\n" + translation_;
     RECT rc{0, 0, contentW, 0};
     DrawTextW(dc, bodyText.c_str(), -1, &rc, DT_WORDBREAK | DT_CALCRECT);
     SelectObject(dc, old);
@@ -343,7 +350,8 @@ void PopupWindow::paint(HDC dc) {
                   DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
     } else {
         SetTextColor(dc, th.text);
-        DrawTextW(dc, translation_.c_str(), -1, &rcText,
+        const auto text = replacementNotice_.empty() ? translation_ : replacementNotice_ + L"\n\n" + translation_;
+        DrawTextW(dc, text.c_str(), -1, &rcText,
                   DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
     }
     RestoreDC(dc, saved);

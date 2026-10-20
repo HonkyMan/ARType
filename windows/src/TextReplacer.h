@@ -7,10 +7,15 @@
 //
 #pragma once
 #include <string>
+#include <optional>
+#include "ReplacementSafety.h"
 
 namespace replacer {
 
 /// 用译文替换（异步，立即返回）。selectAll=true 时先 Ctrl+A 全选（整框改写）。
-void ReplaceAsync(std::wstring text, bool selectAll);
+void ReplaceAsync(std::wstring text, bool selectAll,
+                  std::optional<replacement::Snapshot> target,
+                  std::function<void(replacement::Result)> completion);
+void CancelAll();
 
 } // namespace replacer

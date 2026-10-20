@@ -15,6 +15,22 @@ final class OptionalShortcutTests: XCTestCase {
         XCTAssertEqual(StoredShortcutPreference.decode(legacy, defaultValue: rewrite), read)
     }
 
+    func testCorruptedShortcutFallsBackWithoutIntegerConversionTrap() throws {
+        for keyCode in [-1, 128, Int.max] {
+            let invalid = KeyboardShortcutPreference(keyCode: keyCode, modifiers: [.option])
+            let direct = try JSONEncoder().encode(invalid)
+            let wrapped = try JSONEncoder().encode(StoredShortcutPreference(shortcut: invalid))
+            XCTAssertThrowsError(try JSONDecoder().decode(KeyboardShortcutPreference.self, from: direct))
+            XCTAssertEqual(StoredShortcutPreference.decode(direct, defaultValue: read), read)
+            XCTAssertEqual(StoredShortcutPreference.decode(wrapped, defaultValue: read), read)
+        }
+        for rawValue: UInt in [0, 16, UInt.max] {
+            let invalid = KeyboardShortcutPreference(keyCode: 2, modifiers: .init(rawValue: rawValue))
+            let data = try JSONEncoder().encode(invalid)
+            XCTAssertThrowsError(try JSONDecoder().decode(KeyboardShortcutPreference.self, from: data))
+        }
+    }
+
     func testOneRegisteredShortcutIsReady() {
         XCTAssertTrue(ShortcutConfiguration.isReady(
             read: read, readStatus: .registered,

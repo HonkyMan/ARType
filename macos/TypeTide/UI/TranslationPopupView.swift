@@ -23,6 +23,7 @@ final class TranslationPopupModel: ObservableObject {
     @Published var translation: String = ""
     @Published var isLoading: Bool = true
     @Published var errorText: String?
+    @Published var replacementNotice: String?
     @Published private(set) var tidePhase: TidePhase = .waiting
     /// 当前目标语言（弹窗顶部可改选，触发 onRetarget 重新翻译）
     @Published var targetLanguage: Language
@@ -44,6 +45,7 @@ final class TranslationPopupModel: ObservableObject {
     }
 
     func resetTranslation() {
+        replacementNotice = nil
         translation = ""
         isLoading = true
         errorText = nil
@@ -154,11 +156,18 @@ struct TranslationPopupView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .disabled(model.onRetarget == nil)
     }
 
     @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let notice = model.replacementNotice {
+                Label(notice, systemImage: "info.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let err = model.errorText {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(err, systemImage: "exclamationmark.triangle.fill")

@@ -4,8 +4,7 @@
 
 namespace {
 enum MenuId : UINT {
-    kMenuUpdate = 1,
-    kMenuToggle,
+    kMenuToggle = 1,
     kMenuReadHint,
     kMenuRewriteHint,
     kMenuSettings,
@@ -49,14 +48,15 @@ void TrayIcon::remove() {
     }
 }
 
+void TrayIcon::setStatus(const std::wstring& text) {
+    wcsncpy_s(nid_.szTip, text.c_str(), _TRUNCATE);
+    nid_.uFlags = NIF_TIP;
+    if (added_) Shell_NotifyIconW(NIM_MODIFY, &nid_);
+}
+
 void TrayIcon::showMenu(HWND owner) {
     const Settings& s = Settings::shared();
     HMENU menu = CreatePopupMenu();
-
-    if (updateAvailable_) {
-        AppendMenuW(menu, MF_STRING, kMenuUpdate, L"⬇ New update available");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    }
 
     AppendMenuW(menu, MF_STRING | (s.enabled ? MF_CHECKED : 0), kMenuToggle,
                 s.enabled ? L"ARType is On" : L"ARType is Off");
@@ -79,9 +79,6 @@ void TrayIcon::showMenu(HWND owner) {
     DestroyMenu(menu);
 
     switch (cmd) {
-    case kMenuUpdate:
-        if (onOpenReleases) onOpenReleases();
-        break;
     case kMenuToggle:
         if (onToggleEnabled) onToggleEnabled();
         break;

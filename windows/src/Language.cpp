@@ -50,22 +50,6 @@ std::wstring ShortName(Language l) {
     return pos == std::wstring::npos ? name : name.substr(0, pos);
 }
 
-const char* PromptName(Language l) {
-    switch (l) {
-    case Language::English: return "English";
-    case Language::Chinese: return "Chinese";
-    case Language::Hindi: return "Hindi";
-    case Language::Spanish: return "Spanish";
-    case Language::French: return "French";
-    case Language::Arabic: return "Arabic";
-    case Language::Bengali: return "Bengali";
-    case Language::Russian: return "Russian";
-    case Language::Portuguese: return "Portuguese";
-    case Language::Indonesian: return "Indonesian";
-    }
-    return "English";
-}
-
 namespace {
 
 std::wstring trim(const std::wstring& value) {
@@ -224,16 +208,6 @@ const wchar_t* StyleDisplayName(RewriteStyle s) {
     case RewriteStyle::Polished: return L"Polished";
     }
     return L"Faithful";
-}
-
-const char* StyleInstruction(RewriteStyle s) {
-    switch (s) {
-    case RewriteStyle::Faithful: return "";
-    case RewriteStyle::Formal: return "Use a professional, formal tone.";
-    case RewriteStyle::Casual: return "Use a natural, casual, conversational tone.";
-    case RewriteStyle::Polished: return "Improve clarity and flow so it reads polished and native, while keeping the original meaning.";
-    }
-    return "";
 }
 
 } // namespace lang

@@ -17,7 +17,7 @@ final class TriggerController {
 
     private let readHotkeyID: UInt32 = 1
     private let rewriteHotkeyID: UInt32 = 2
-    private let maximumInputCharacters = 5_000
+    private let maximumInputCharacters = TranslationActionPolicy.maximumInputCharacters
 
     private var streamTask: Task<Void, Never>?
     private var rewriteTask: Task<Void, Never>?
@@ -66,7 +66,7 @@ final class TriggerController {
         readShortcutStatus = .inactive
         rewriteShortcutStatus = .inactive
 
-        guard AppSettings.isEnabled else { return }
+        guard AppSettings.isEnabled else { cancelTranslations(); return }
 
         let readShortcut = AppSettings.readShortcut
         let rewriteShortcut = AppSettings.rewriteShortcut
@@ -131,7 +131,7 @@ final class TriggerController {
             return
         }
         guard !AppSettings.shouldSkipFrontmostApplication() else { return }
-        readCaptureTask?.cancel()
+        cancelTranslations()
         let context=contextGeneration
         readCaptureTask = Task { @MainActor in
             let captured=await SelectionCapture.readSelection()
@@ -144,6 +144,9 @@ final class TriggerController {
                 presentCaptureFailure("The selection is too long (\(cap.text.count) characters; maximum \(maximumInputCharacters)).")
                 return
             }
+            // presentRead starts a new presentation context. Detach this finished
+            // capture so cancelling the previous context does not cancel itself.
+            readCaptureTask = nil
             presentRead(text: cap.text, element: cap.element, range: cap.range,
                         targetOverride: targetOverride(for: action))
         }
@@ -159,8 +162,14 @@ final class TriggerController {
 
     /// 显示读翻译弹窗并流式填充（供快捷键 / 图标 / 自动模式共用）。
     func presentRead(text: String, element: AXUIElement?, range: CFRange?, targetOverride: Language? = nil,
-                     dismissOnInteraction: Bool = true) {
+                     dismissOnInteraction: Bool = true, replacementTarget: ReplacementTarget? = nil) {
+        guard TranslationActionPolicy.permits(text, enabled: AppSettings.isEnabled,
+            applicationIdentifiers: AppSettings.applicationIdentifiers(NSWorkspace.shared.frontmostApplication),
+            exclusions: AppSettings.skipApps) else { return }
+        cancelTranslations()
         let anchor = PopupPositioner.anchorRect(element: element, range: range)
+        let destination = replacementTarget ??
+            ReplacementTarget.capture(element: element, range: range, text: text, wholeField: false)
         let dir = targetOverride.map { (from: Language.detect(in: text), to: $0) }
             ?? resolveDirection(text: text, mode: AppSettings.readDirection, isWrite: false)
         let model = PopupController.shared.show(original: text, target: dir.to, anchor: anchor,
@@ -172,7 +181,8 @@ final class TriggerController {
             self.replacementTask = Task { @MainActor in
                 guard self.contextGeneration==context, !Task.isCancelled else {return}
                 PopupController.shared.close()
-                await TextReplacer.replace(with: model.translation, selectAll: false)
+                await self.replaceOrOfferCopy(model.translation, original: text, language: model.targetLanguage,
+                                             anchor: anchor, selectAll: false, target: destination, context: context)
             }
         }
         model.onRetarget = { [weak self, weak model] newTarget in
@@ -235,8 +245,7 @@ final class TriggerController {
             return
         }
         guard !AppSettings.shouldSkipFrontmostApplication() else { return }
-        rewriteTask?.cancel()
-        rewriteRequestID &+= 1
+        cancelTranslations()
         let requestID = rewriteRequestID
         rewriteTask = Task { @MainActor [self] in
             guard let cap = await SelectionCapture.captureForRewrite() else {
@@ -262,10 +271,14 @@ final class TriggerController {
                 model.onReplace = { [weak self, weak model] in
                     guard let self, self.isCurrentRewrite(requestID),
                           let model, !model.translation.isEmpty else { return }
-                    Task { @MainActor in
+                    let context = self.contextGeneration
+                    self.replacementTask = Task { @MainActor in
                         guard self.isCurrentRewrite(requestID) else { return }
                         PopupController.shared.close()
-                        await TextReplacer.replace(with: model.translation, selectAll: cap.isWholeField)
+                        await self.replaceOrOfferCopy(model.translation, original: cap.text, language: model.targetLanguage,
+                                                     anchor: anchor, selectAll: cap.isWholeField,
+                                                     target: cap.replacementTarget?.requiring { self.isCurrentRewrite(requestID) },
+                                                     context: context)
                     }
                 }
                 model.onRetarget = { [weak self, weak model] newTarget in
@@ -280,7 +293,11 @@ final class TriggerController {
                     let translated = try await TranslationService.shared.translateFully(
                         text: cap.text, from: dir.from, to: dir.to, style: style)
                     guard isCurrentRewrite(requestID) else { return }
-                    await TextReplacer.replace(with: translated, selectAll: cap.isWholeField)
+                    await replaceOrOfferCopy(translated, original: cap.text, language: dir.to,
+                                             anchor: PopupPositioner.anchorRect(element: cap.element, range: cap.selectedRange),
+                                             selectAll: cap.isWholeField,
+                                             target: cap.replacementTarget?.requiring { self.isCurrentRewrite(requestID) },
+                                             context: contextGeneration)
                 } catch {
                     guard isCurrentRewrite(requestID) else { return }
                     let anchor = PopupPositioner.anchorRect(element: cap.element, range: cap.selectedRange)
@@ -293,6 +310,19 @@ final class TriggerController {
 
     private func isCurrentRewrite(_ requestID: UInt64) -> Bool {
         requestID == rewriteRequestID && !Task.isCancelled
+    }
+
+    private func replaceOrOfferCopy(_ translation: String, original: String, language: Language,
+                                    anchor: NSRect, selectAll: Bool, target: ReplacementTarget?,
+                                    context: UInt64) async {
+        let destination = target?.requiring { [weak self] in self?.contextGeneration == context }
+        let replaced = await TextReplacer.replace(with: translation, selectAll: selectAll, target: destination)
+        guard !replaced, contextGeneration == context, !Task.isCancelled else { return }
+        let model = PopupController.shared.show(original: original, target: language, anchor: anchor, onReplace: nil)
+        model.translation = translation
+        model.replacementNotice = "Исходное поле или выделение изменилось либо недоступно. Перевод сохранён — скопируйте его и вставьте вручную."
+        model.finishTranslation()
+        model.finishTide()
     }
 
     private func targetOverride(for action: ShortcutAction) -> Language? {

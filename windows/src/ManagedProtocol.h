@@ -1,6 +1,6 @@
 #pragma once
 #include "Json.h"
-#include <regex>
+#include "ManagedEndpoint.h"
 #include <string>
 
 namespace managed {
@@ -16,10 +16,7 @@ inline std::string AccessNotice(const json::Value& profile,const std::string& se
     return {};
 }
 inline bool OriginAllowed(std::string value) {
-    if (!value.empty() && value.back()=='/') value.pop_back();
-    static const std::regex https(R"(^https://([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(:[0-9]{1,5})?$)");
-    static const std::regex local(R"(^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?$)");
-    return std::regex_match(value,https) || std::regex_match(value,local);
+    return !CanonicalOrigin(std::move(value)).empty();
 }
 inline json::Value Request(const std::string& text,const std::string& source,
                            const std::string& target,const std::string& style,

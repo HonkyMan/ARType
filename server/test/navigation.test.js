@@ -1,30 +1,586 @@
-import { test } from 'node:test';
+import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import vm from 'node:vm';
-import fs from 'node:fs';
+import {randomUUID} from 'node:crypto';
+import {createConsole} from '../public/modules/console.js';
 
-test('slower previous tenant response cannot replace a newer tenant form',async()=>{
-  const root={innerHTML:'',addEventListener(){}};
-  const context=vm.createContext({document:{querySelector:()=>root},fetch:()=>new Promise(()=>{}),setTimeout,location:{search:''},URLSearchParams,console});
-  vm.runInContext(fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),context);
-  vm.runInContext(`me={operator:true,tenants:[{id:'A',role:'owner'},{id:'B',role:'owner'}]};
-    globalThis.waiters={};globalThis.renders=[];
-    api=path=>path==='/api/provider-credentials'?Promise.resolve({credentials:[]}):new Promise(r=>waiters[path]=r);
-    shell=()=>{rootRemoved=true};
-    renderTenant=()=>renders.push({target:current,display:details.tenant.id});
-    globalThis.a=openTenant('A');globalThis.b=openTenant('B');`,context);
-  vm.runInContext("waiters['/api/tenants/B']({tenant:{id:'B'}})",context);await context.b;
-  vm.runInContext("waiters['/api/tenants/A']({tenant:{id:'A'}})",context);await context.a;
-  assert.deepEqual(JSON.parse(JSON.stringify(context.renders)),[{target:'B',display:'B'}]);
-  assert.ok(context.rootRemoved,'old form is removed synchronously while a new tenant is loading');
+const memberProfile = {
+  user: {id: 'member', name: 'Alice', email: 'alice@example.com'},
+  operator: false, csrf: 'csrf', tenants: [],
+};
+const operatorProfile = {...memberProfile, operator: true};
+const dashboard = {
+  period: '2026-10-01', tenants: [], billed_seats: 0, connected_seats: 0,
+  invoice_amount_cents: 0, unit_price_cents: 500,
+};
+function tenantDetails(id, extra = {}) {
+  return {
+    tenant: {
+      id, name: `Organization ${id}`, role: 'owner', status: 'active', seats: 10,
+      monthly_characters: 1000000, revision: 1, instructions: '', languages: ['en', 'ru'],
+      model: 'managed-model', credential: 'managed', max_text: 5000, rpm: 60, concurrency: 8,
+      access_until: null,
+    },
+    members: [], recent: [], billing: null,
+    usage: {requests: 0, characters: 0, failures: 0}, ...extra,
+  };
+}
+
+// Real modules own state, navigation, templates and actions. Only browser IO
+// and fetch are substituted, so delays exercise the production request flow.
+function browserStorage() {
+  const values = new Map();
+  return {
+    values,
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+}
+
+function browserFixture(storage = browserStorage()) {
+  const listeners = {};
+  const root = {
+    innerHTML: '', addEventListener(name, handler) { listeners[name] = handler; },
+    querySelector() { return null; },
+  };
+  const message = {textContent: '', hidden: true};
+  const pending = [];
+  const application = createConsole({
+    document: {querySelector(selector) { return selector === '#app' ? root : message; }},
+    fetch(path, options) {
+      const savedAtSend = [...(storage.values?.values() || [])];
+      return new Promise((resolve, reject) => pending.push({path, options, savedAtSend, resolve, reject, settled: false}));
+    },
+    setTimeout() {}, location: {search: '', hash: '', origin: 'https://artype.test'},
+    history: {replaceState() {}}, navigator: {clipboard: {writeText: async () => {}}},
+    crypto: {randomUUID},
+    sessionStorage: storage,
+    FormData: class {constructor(form) { return Object.entries(form.values); }},
+  });
+  const ready = application.start();
+  const next = path => {
+    const request = pending.find(item => item.path === path && !item.settled);
+    assert.ok(request, `Expected pending request ${path}`);
+    return request;
+  };
+  const settle = async (request, data, status = 200) => {
+    request.settled = true;
+    request.resolve({ok: status >= 200 && status < 300, status, json: async () => data});
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  const fail = async request => {
+    request.settled = true;
+    request.reject(new TypeError('Connection lost'));
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  const signIn = async (profile = memberProfile) => {
+    await settle(next('/api/me'), profile);
+    if (profile.operator) await settle(next('/api/dashboard'), dashboard);
+    await ready;
+  };
+  const click = dataset => listeners.click({target: {closest: () => ({dataset, isConnected: false})}});
+  const form = (kind, values, tenant) => {
+    const submit = {disabled: false, isConnected: true};
+    return {
+      dataset: {form: kind, ...(tenant ? {tenantId: tenant} : {})}, values,
+      querySelector: () => submit, reset() { this.values = {}; },
+    };
+  };
+  const submit = form => listeners.submit({target: form, preventDefault() {}});
+  return {application, root, pending, message, next, settle, fail, signIn, click, form, submit, ready};
+}
+
+test('a successful profile response arriving after another request expires the session cannot reopen the cabinet', async () => {
+  const app = browserFixture();
+  const initial = app.next('/api/me');
+  const refresh = app.application.start();
+  const newer = app.pending.filter(request => request.path === '/api/me')[1];
+  await app.settle(newer, {error: {message: 'Session expired'}}, 401);
+  await refresh;
+  assert.match(app.root.innerHTML, /Добро пожаловать/);
+  await app.settle(initial, memberProfile);
+  await app.ready;
+  assert.match(app.root.innerHTML, /Добро пожаловать/);
+  assert.doesNotMatch(app.root.innerHTML, /Вы вошли как/);
 });
 
-test('opening tenant directly from dashboard loads connection options before rendering settings',async()=>{
-  const root={innerHTML:'',addEventListener(){}};
-  const context=vm.createContext({document:{querySelector:()=>root},fetch:()=>new Promise(()=>{}),setTimeout,location:{search:''},URLSearchParams,console});
-  vm.runInContext(fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),context);
-  vm.runInContext(`me={operator:true,tenants:[{id:'A',role:'operator'}]};globalThis.rendered=[];
-    api=async path=>path==='/api/provider-credentials'?{credentials:[{alias:'managed',base_url:'https://example.com/v1',default_model:'chosen'}]}:{tenant:{id:'A'}};
-    shell=()=>{};renderTenant=()=>rendered.push(...connections.map(c=>c.alias));globalThis.open=openTenant('A');`,context);
-  await context.open;assert.deepEqual(JSON.parse(JSON.stringify(context.rendered)),['managed']);
+test('a profile refresh started before logout cannot restore the signed-out cabinet', async () => {
+  const app = browserFixture();
+  await app.signIn();
+  const refresh = app.application.start();
+  const profile = app.next('/api/me');
+  const logout = app.click({action: 'logout'});
+  assert.match(app.root.innerHTML, /Добро пожаловать/, 'logout hides private state before its network response');
+  const logoutRequest = app.next('/api/logout');
+  assert.equal(logoutRequest.options.headers['X-CSRF-Token'], 'csrf');
+  await app.settle(logoutRequest, {ok: true});
+  await logout;
+  await app.settle(profile, memberProfile);
+  await refresh;
+  assert.match(app.root.innerHTML, /Добро пожаловать/);
+  assert.doesNotMatch(app.root.innerHTML, /Вы вошли как/);
+});
+
+test('slower previous tenant response cannot replace a newer tenant form', async () => {
+  const app = browserFixture();
+  await app.signIn({...memberProfile, tenants: [{id: 'A', name: 'A', role: 'owner'}, {id: 'B', name: 'B', role: 'owner'}]});
+  const first = app.application.openTenant('A');
+  assert.doesNotMatch(app.root.innerHTML, /data-form="invite"/, 'old controls are removed synchronously');
+  const second = app.application.openTenant('B');
+  await app.settle(app.next('/api/tenants/B'), tenantDetails('B'));
+  await second;
+  await app.settle(app.next('/api/tenants/A'), tenantDetails('A'));
+  await first;
+  assert.match(app.root.innerHTML, /<h1>Organization B<\/h1>/);
+  assert.match(app.root.innerHTML, /data-tenant-id="B"/);
+  assert.doesNotMatch(app.root.innerHTML, /data-tenant-id="A"/);
+});
+
+test('opening tenant from dashboard loads actual connection options before rendering settings', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const open = app.application.openTenant('A', 'settings');
+  await app.settle(app.next('/api/tenants/A'), tenantDetails('A'));
+  assert.doesNotMatch(app.root.innerHTML, /data-form="settings"/);
+  await app.settle(app.next('/api/provider-credentials'), {
+    credentials: [{alias: 'managed', base_url: 'https://example.com/v1', default_model: 'chosen'}],
+  });
+  await open;
+  assert.match(app.root.innerHTML, /<option value="managed" selected>managed<\/option>/);
+  assert.match(app.root.innerHTML, /https:\/\/example.com\/v1/);
+});
+
+const wallet = {
+  balance_cents: 10000, unit_price_cents: 500, currency: 'USD', period: '2026-10-01',
+  pending_seats: 0, required_cents: 0, missing_cents: 0, entries: [],
+};
+
+async function openOperatorTenant(app, id = 'A') {
+  const open = app.application.openTenant(id, 'team');
+  await app.settle(app.next(`/api/tenants/${id}`), tenantDetails(id, {billing: wallet}));
+  await app.settle(app.next('/api/provider-credentials'), {credentials: []});
+  await open;
+}
+
+test('tenant tabs retain their billing, usage and settings views after modular extraction', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  await openOperatorTenant(app);
+  await app.click({action: 'section:billing'});
+  assert.match(app.root.innerHTML, /Последние 50 операций/);
+  assert.match(app.root.innerHTML, /Операций пока нет/);
+  await app.click({action: 'section:usage'});
+  assert.match(app.root.innerHTML, /Первый перевод ещё впереди/);
+  await app.click({action: 'section:settings'});
+  assert.match(app.root.innerHTML, /data-form="settings"/);
+  assert.equal(app.message.textContent, '');
+});
+
+test('an ambiguous balance failure survives navigation and retries the identical operation key', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  await openOperatorTenant(app);
+  const form = app.form('balance', {operation: 'credit', amount: '25.10', reason: 'INV-001'}, 'A');
+  const first = app.submit(form);
+  const attempted = app.next('/api/tenants/A/balance');
+  assert.equal(attempted.options.headers['X-CSRF-Token'], 'csrf');
+  await app.fail(attempted);
+  await first;
+
+  await openOperatorTenant(app);
+  assert.match(app.root.innerHTML, /name="amount"[^>]*value="25\.10"/);
+  assert.match(app.root.innerHTML, /name="reason"[^>]*value="INV-001"/);
+  assert.match(app.root.innerHTML, /предыдущей операции/);
+
+  const retryForm = app.form('balance', {operation: 'credit', amount: '25.10', reason: 'INV-001'}, 'A');
+  const retry = app.submit(retryForm);
+  const repeated = app.next('/api/tenants/A/balance');
+  assert.deepEqual(JSON.parse(repeated.options.body), {
+    operation: 'credit', amount_cents: 2510, reason: 'INV-001',
+    idempotency_key: JSON.parse(attempted.options.body).idempotency_key,
+  });
+  await app.fail(repeated);
+  await retry;
+});
+
+test('editing an ambiguous balance operation cannot mint a second credit or send concurrently', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const form = app.form('balance', {operation: 'credit', amount: '25.10', reason: 'INV-001'}, 'A');
+  const first = app.submit(form);
+  await app.submit(form);
+  assert.equal(app.pending.filter(request => request.path.endsWith('/balance')).length, 1);
+  await app.fail(app.next('/api/tenants/A/balance'));
+  await first;
+  form.values.amount = '30.00';
+  await app.submit(form);
+  assert.equal(app.pending.filter(request => request.path.endsWith('/balance')).length, 1);
+  assert.match(app.message.textContent, /Новая операция пока не отправлена/);
+});
+
+test('reloading the tab restores the exact ambiguous operation and retries its persisted key only on submission', async () => {
+  const storage = browserStorage();
+  const first = browserFixture(storage);
+  await first.signIn(operatorProfile);
+  const values = {operation: 'credit', amount: '25.10', reason: 'INV-persisted'};
+  const save = first.submit(first.form('balance', values, 'A'));
+  const original = first.next('/api/tenants/A/balance');
+  const sent = JSON.parse(original.options.body);
+  assert.ok(original.savedAtSend.some(value => value.includes(sent.idempotency_key)),
+    'the exact key is already durable when fetch begins');
+  await first.fail(original);
+  await save;
+
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  await openOperatorTenant(reloaded);
+  assert.match(reloaded.root.innerHTML, /value="INV-persisted"/);
+  assert.equal(reloaded.pending.some(request => request.path.endsWith('/balance')), false);
+  const retry = reloaded.submit(reloaded.form('balance', values, 'A'));
+  const repeated = reloaded.next('/api/tenants/A/balance');
+  assert.deepEqual(JSON.parse(repeated.options.body), sent);
+  await reloaded.fail(repeated);
+  await retry;
+});
+
+test('logout hides pending finance data, another user cannot reuse it, and the original user can resume later', async () => {
+  const storage = browserStorage();
+  const first = browserFixture(storage);
+  await first.signIn(operatorProfile);
+  const save = first.submit(first.form('balance', {operation: 'credit', amount: '10', reason: 'PRIVATE-invoice'}, 'A'));
+  const original = first.next('/api/tenants/A/balance');
+  await first.fail(original);
+  await save;
+  const logout = first.click({action: 'logout'});
+  assert.doesNotMatch(first.root.innerHTML, /PRIVATE-invoice/);
+  await first.settle(first.next('/api/logout'), {ok: true});
+  await logout;
+
+  const second = browserFixture(storage);
+  await second.signIn({...operatorProfile, user: {...operatorProfile.user, id: 'other-user'}});
+  await openOperatorTenant(second);
+  assert.doesNotMatch(second.root.innerHTML, /PRIVATE-invoice/);
+  const otherSave = second.submit(second.form('balance', {operation: 'credit', amount: '20', reason: 'Other invoice'}, 'A'));
+  const otherRequest = second.next('/api/tenants/A/balance');
+  assert.notEqual(JSON.parse(otherRequest.options.body).idempotency_key, JSON.parse(original.options.body).idempotency_key);
+  await second.fail(otherRequest);
+  await otherSave;
+
+  const originalUser = browserFixture(storage);
+  await originalUser.signIn(operatorProfile);
+  await openOperatorTenant(originalUser);
+  assert.match(originalUser.root.innerHTML, /value="PRIVATE-invoice"/);
+  assert.doesNotMatch(originalUser.root.innerHTML, /value="Other invoice"/);
+});
+
+test('pending operations for two tenants retain independent requests and keys after a reload', async () => {
+  const storage = browserStorage();
+  const app = browserFixture(storage);
+  await app.signIn(operatorProfile);
+  const keys = [];
+  for (const tenant of ['A', 'B']) {
+    const save = app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: `Invoice for ${tenant}`}, tenant));
+    const request = app.next(`/api/tenants/${tenant}/balance`);
+    keys.push(JSON.parse(request.options.body).idempotency_key);
+    await app.fail(request);
+    await save;
+  }
+  assert.notEqual(keys[0], keys[1]);
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  for (const tenant of ['A', 'B']) {
+    await openOperatorTenant(reloaded, tenant);
+    assert.match(reloaded.root.innerHTML, new RegExp(`value="Invoice for ${tenant}"`));
+    assert.doesNotMatch(reloaded.root.innerHTML, new RegExp(`value="Invoice for ${tenant === 'A' ? 'B' : 'A'}"`));
+  }
+});
+
+test('unavailable journal storage prevents a financial request while other pages continue working', async () => {
+  const storage = {...browserStorage(), setItem() { throw new Error('Storage unavailable'); }};
+  const app = browserFixture(storage);
+  await app.signIn(operatorProfile);
+  const attempted = app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Paid invoice'}, 'A'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(app.pending.some(request => request.path.endsWith('/balance')), false);
+  await attempted;
+  assert.match(app.message.textContent, /[Жж]урнал|хранилищ/);
+  const help = app.application.helpPage();
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await help;
+  assert.match(app.root.innerHTML, /<h1>Установка и помощь<\/h1>/);
+});
+
+test('a storage adapter that fails to retain the write cannot send a financial request', async () => {
+  const storage = {...browserStorage(), setItem() {}};
+  const app = browserFixture(storage);
+  await app.signIn(operatorProfile);
+  await app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Paid invoice'}, 'A'));
+  assert.equal(app.pending.some(request => request.path.endsWith('/balance')), false);
+  assert.match(app.message.textContent, /Журнал финансовых операций недоступен/);
+});
+
+test('a confirmed balance operation is removed only after its updated tenant form loads', async () => {
+  const storage = browserStorage();
+  const app = browserFixture(storage);
+  await app.signIn(operatorProfile);
+  await openOperatorTenant(app);
+  const save = app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Confirmed invoice'}, 'A'));
+  const request = app.next('/api/tenants/A/balance');
+  await app.settle(request, {ok: true});
+  assert.ok([...storage.values.values()].some(value => value.includes('Confirmed invoice')));
+  await app.settle(app.next('/api/tenants/A'), tenantDetails('A', {billing: wallet}));
+  await app.settle(app.next('/api/provider-credentials'), {credentials: []});
+  await save;
+  assert.ok([...storage.values.values()].every(value => !value.includes('Confirmed invoice')));
+
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  await openOperatorTenant(reloaded);
+  assert.doesNotMatch(reloaded.root.innerHTML, /value="Confirmed invoice"|предыдущей операции/);
+});
+
+test('a successful retry clears the journal of an earlier ambiguous operation', async () => {
+  const storage = browserStorage();
+  const values = {operation: 'credit', amount: '10', reason: 'Eventually confirmed invoice'};
+  const first = browserFixture(storage);
+  await first.signIn(operatorProfile);
+  const attempted = first.submit(first.form('balance', values, 'A'));
+  const request = first.next('/api/tenants/A/balance');
+  await first.fail(request);
+  await attempted;
+
+  const retryApp = browserFixture(storage);
+  await retryApp.signIn(operatorProfile);
+  await openOperatorTenant(retryApp);
+  const retry = retryApp.submit(retryApp.form('balance', values, 'A'));
+  const retryRequest = retryApp.next('/api/tenants/A/balance');
+  assert.deepEqual(JSON.parse(retryRequest.options.body), JSON.parse(request.options.body));
+  await retryApp.settle(retryRequest, {ok: true});
+  await retryApp.settle(retryApp.next('/api/tenants/A'), tenantDetails('A', {billing: wallet}));
+  await retryApp.settle(retryApp.next('/api/provider-credentials'), {credentials: []});
+  await retry;
+
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  await openOperatorTenant(reloaded);
+  assert.doesNotMatch(reloaded.root.innerHTML, /value="Eventually confirmed invoice"|предыдущей операции/);
+});
+
+for (const status of [409, 422]) {
+  test(`a balance ${status} response ${status === 409 ? 'retains' : 'clears'} the persisted operation`, async () => {
+    const storage = browserStorage();
+    const app = browserFixture(storage);
+    await app.signIn(operatorProfile);
+    const save = app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Rejected invoice'}, 'A'));
+    const original = app.next('/api/tenants/A/balance');
+    await app.settle(original, {error: {message: 'Rejected'}}, status);
+    await save;
+
+    const reloaded = browserFixture(storage);
+    await reloaded.signIn(operatorProfile);
+    await openOperatorTenant(reloaded);
+    assert.equal(reloaded.root.innerHTML.includes('value="Rejected invoice"'), status === 409);
+    assert.equal(reloaded.pending.some(request => request.path.endsWith('/balance')), false);
+    if (status === 422) {
+      const retry = reloaded.submit(reloaded.form('balance', {operation: 'credit', amount: '10', reason: 'Rejected invoice'}, 'A'));
+      const request = reloaded.next('/api/tenants/A/balance');
+      assert.notEqual(JSON.parse(request.options.body).idempotency_key, JSON.parse(original.options.body).idempotency_key);
+      await reloaded.fail(request);
+      await retry;
+    }
+  });
+}
+
+for (const status of [401, 403, 422]) {
+  test(`a retry rejected with ${status} cannot discard an earlier operation whose response was lost`, async () => {
+    const storage = browserStorage();
+    const values = {operation: 'credit', amount: '10', reason: 'Potentially committed invoice'};
+    const originalApp = browserFixture(storage);
+    await originalApp.signIn(operatorProfile);
+    const originalSave = originalApp.submit(originalApp.form('balance', values, 'A'));
+    const originalRequest = originalApp.next('/api/tenants/A/balance');
+    const originalBody = JSON.parse(originalRequest.options.body);
+    // The browser cannot tell a lost response after commit from a failed send.
+    await originalApp.fail(originalRequest);
+    await originalSave;
+
+    const retryApp = browserFixture(storage);
+    await retryApp.signIn(operatorProfile);
+    const retry = retryApp.submit(retryApp.form('balance', values, 'A'));
+    const retryRequest = retryApp.next('/api/tenants/A/balance');
+    assert.deepEqual(JSON.parse(retryRequest.options.body), originalBody);
+    await retryApp.settle(retryRequest, {error: {message: 'Access or validation rejected'}}, status);
+    await retry;
+
+    const reloaded = browserFixture(storage);
+    await reloaded.signIn(operatorProfile);
+    await openOperatorTenant(reloaded);
+    assert.match(reloaded.root.innerHTML, /value="Potentially committed invoice"/);
+    assert.equal(reloaded.pending.some(request => request.path.endsWith('/balance')), false);
+    const resumed = reloaded.submit(reloaded.form('balance', values, 'A'));
+    const resumedRequest = reloaded.next('/api/tenants/A/balance');
+    assert.deepEqual(JSON.parse(resumedRequest.options.body), originalBody);
+    await reloaded.fail(resumedRequest);
+    await resumed;
+  });
+}
+
+test('a damaged journal is not discarded to allow a new financial request', async () => {
+  const storage = browserStorage();
+  const first = browserFixture(storage);
+  await first.signIn(operatorProfile);
+  const save = first.submit(first.form('balance', {operation: 'credit', amount: '10', reason: 'Original invoice'}, 'A'));
+  await first.fail(first.next('/api/tenants/A/balance'));
+  await save;
+  const key = [...storage.values.keys()][0];
+  storage.setItem(key, '{incomplete');
+
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  await openOperatorTenant(reloaded);
+  assert.match(reloaded.root.innerHTML, /Журнал финансовых операций недоступен/);
+  await reloaded.submit(reloaded.form('balance', {operation: 'credit', amount: '10', reason: 'Original invoice'}, 'A'));
+  assert.equal(reloaded.pending.some(request => request.path.endsWith('/balance')), false);
+  assert.equal(storage.getItem(key), '{incomplete');
+});
+
+test('a journal read error leaves ordinary navigation available and finance closed', async () => {
+  const storage = {...browserStorage(), getItem() { throw new Error('Blocked storage'); }};
+  const app = browserFixture(storage);
+  await app.signIn(operatorProfile);
+  assert.match(app.root.innerHTML, /<h1>Dashboard<\/h1>/);
+  await openOperatorTenant(app);
+  assert.match(app.root.innerHTML, /Журнал финансовых операций недоступен/);
+  await app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Paid invoice'}, 'A'));
+  assert.equal(app.pending.some(request => request.path.endsWith('/balance')), false);
+});
+
+test('logout during a balance request keeps its journal when the late response cannot establish an outcome', async () => {
+  const storage = browserStorage();
+  const first = browserFixture(storage);
+  await first.signIn(operatorProfile);
+  const save = first.submit(first.form('balance', {operation: 'credit', amount: '10', reason: 'Late invoice'}, 'A'));
+  const balance = first.next('/api/tenants/A/balance');
+  const logout = first.click({action: 'logout'});
+  await first.settle(first.next('/api/logout'), {ok: true});
+  await logout;
+  await first.settle(balance, {ok: true});
+  await save;
+  assert.match(first.root.innerHTML, /Добро пожаловать/);
+
+  const reloaded = browserFixture(storage);
+  await reloaded.signIn(operatorProfile);
+  await openOperatorTenant(reloaded);
+  assert.match(reloaded.root.innerHTML, /value="Late invoice"/);
+  const retry = reloaded.submit(reloaded.form('balance', {operation: 'credit', amount: '10', reason: 'Late invoice'}, 'A'));
+  const repeated = reloaded.next('/api/tenants/A/balance');
+  assert.deepEqual(JSON.parse(repeated.options.body), JSON.parse(balance.options.body));
+  await reloaded.fail(repeated);
+  await retry;
+});
+
+test('member screens do not render management controls and escape organization and identity strings', async () => {
+  const app = browserFixture();
+  await app.signIn({
+    ...memberProfile,
+    user: {...memberProfile.user, name: '<img src=x onerror=alert(1)>'},
+    tenants: [{id: 'A', name: '<script>private</script>', role: 'member', status: 'active'}],
+  });
+  assert.match(app.root.innerHTML, /&lt;script&gt;private&lt;\/script&gt;/);
+  assert.doesNotMatch(app.root.innerHTML, /<img src=x/);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="(?:create|admin|provider|balance)"/);
+  const open = app.application.openTenant('A');
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await open;
+  assert.match(app.root.innerHTML, /Участниками и правилами управляет/);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="(?:invite|settings|balance)"/);
+  assert.equal(app.pending.some(request => request.path === '/api/tenants/A'), false);
+});
+
+test('a submitted provider form keeps a blank key absent and does not navigate back from another page', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const form = app.form('provider', {
+    alias: 'managed', key: '', base_url: 'https://provider.example/v1', default_model: 'chosen',
+  });
+  const save = app.submit(form);
+  const request = app.next('/api/provider-credentials/managed');
+  assert.deepEqual(JSON.parse(request.options.body), {
+    base_url: 'https://provider.example/v1', default_model: 'chosen',
+  });
+  const help = app.application.helpPage();
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await help;
+  await app.settle(request, {ok: true});
+  await save;
+  assert.match(app.root.innerHTML, /<h1>Установка и помощь<\/h1>/);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="provider"/);
+});
+
+test('a current navigation failure shows its error instead of leaving an unexplained loading page', async () => {
+  const app = browserFixture();
+  await app.signIn();
+  const help = app.click({action: 'help'});
+  await app.settle(app.next('/api/downloads'), {error: {message: 'Downloads temporarily unavailable'}}, 503);
+  await help;
+  assert.equal(app.message.textContent, 'Downloads temporarily unavailable');
+});
+
+test('a delayed error from an earlier page cannot replace the current page error state', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const oldPage = app.click({action: 'provider'});
+  const oldRequest = app.next('/api/provider-credentials');
+  const newPage = app.click({action: 'help'});
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await newPage;
+  await app.settle(oldRequest, {error: {message: 'Old provider failure'}}, 503);
+  await oldPage;
+  assert.match(app.root.innerHTML, /<h1>Установка и помощь<\/h1>/);
+  assert.notEqual(app.message.textContent, 'Old provider failure');
+});
+
+test('a failed initial dashboard cannot overwrite the error state after navigation elsewhere', async () => {
+  const app = browserFixture();
+  await app.settle(app.next('/api/me'), operatorProfile);
+  const initialDashboard = app.next('/api/dashboard');
+  const help = app.click({action: 'help'});
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await help;
+  await app.settle(initialDashboard, {error: {message: 'Old dashboard failure'}}, 503);
+  await app.ready;
+  assert.match(app.root.innerHTML, /<h1>Установка и помощь<\/h1>/);
+  assert.notEqual(app.message.textContent, 'Old dashboard failure');
+});
+
+test('logout invalidates a profile even when its response body is still being decoded', async () => {
+  const app = browserFixture();
+  await app.signIn();
+  const refresh = app.application.start();
+  const request = app.next('/api/me');
+  let finishBody;
+  request.settled = true;
+  request.resolve({ok: true, status: 200, json: () => new Promise(resolve => { finishBody = resolve; })});
+  await new Promise(resolve => setImmediate(resolve));
+  const logout = app.click({action: 'logout'});
+  await app.settle(app.next('/api/logout'), {ok: true});
+  await logout;
+  finishBody(memberProfile);
+  await refresh;
+  assert.match(app.root.innerHTML, /Добро пожаловать/);
+  assert.doesNotMatch(app.root.innerHTML, /Вы вошли как/);
+});
+
+test('a failed server logout still rejects a previously pending successful response', async () => {
+  const app = browserFixture();
+  await app.signIn();
+  const refresh = app.application.start();
+  const profile = app.next('/api/me');
+  const logout = app.click({action: 'logout'});
+  await app.fail(app.next('/api/logout'));
+  await logout;
+  assert.match(app.message.textContent, /Сервер не подтвердил выход/);
+  await app.settle(profile, memberProfile);
+  await refresh;
+  assert.match(app.root.innerHTML, /Добро пожаловать/);
 });

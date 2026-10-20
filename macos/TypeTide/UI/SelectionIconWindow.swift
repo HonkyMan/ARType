@@ -15,7 +15,7 @@ final class SelectionIconWindow {
 
     private var panel: NSPanel?
     private var dismissMonitor: Any?
-    private var autoHideTask: Task<Void, Never>?
+    private let autoHide = SelectionIconAutoHide()
     private let size: CGFloat = 28
 
     /// 贴合选区显示图标：放在选区右端外侧、垂直居中。
@@ -67,15 +67,11 @@ final class SelectionIconWindow {
         dismissMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in self?.hide() }
         }
-        autoHideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            self.hide()
-        }
+        autoHide.schedule { [weak self] in self?.hide() }
     }
 
     func hide() {
-        autoHideTask?.cancel()
-        autoHideTask = nil
+        autoHide.cancel()
         if let dismissMonitor { NSEvent.removeMonitor(dismissMonitor) }
         dismissMonitor = nil
         panel?.orderOut(nil)

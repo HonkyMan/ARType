@@ -12,7 +12,9 @@ before(async()=>{
     if(mode==='partial'){res.writeHead(200,{'Content-Type':'application/json'});res.write('{"choices":[');return res.destroy();}
     if(mode==='redirect'){res.writeHead(302,{Location:'/somewhere'});return res.end();}
     res.writeHead(200,{'Content-Type':'application/json'});
-    res.end(JSON.stringify({choices:[{message:{content:'Hello'},finish_reason:mode==='truncated'?'length':mode==='error'?'error':mode==='tools'?'tool_calls':mode==='no_finish'?null:'stop',...(mode==='choice_error'?{error:{message:'failed'}}:{})}],usage:{prompt_tokens:12,completion_tokens:4}}));
+    const tokens = {negative:-1,fractional:1.5,string:'12',overflow:2147483648}[mode] ?? 12;
+    const content = {nul:'Hello\u0000world',only_nul:'\u0000',formatting:'Hello\n\tworld'}[mode] ?? 'Hello';
+    res.end(JSON.stringify({choices:[{message:{content},finish_reason:mode==='truncated'?'length':mode==='error'?'error':mode==='tools'?'tool_calls':mode==='no_finish'?null:'stop',...(mode==='choice_error'?{error:{message:'failed'}}:{})}],usage:{prompt_tokens:tokens,completion_tokens:4}}));
   }).listen(0,'127.0.0.1');
   await new Promise(r=>server.once('listening',r));base=`http://127.0.0.1:${server.address().port}/v1`;
 });
@@ -34,4 +36,18 @@ test('selected connection URL overrides deployment default in the actual HTTP ad
 });
 test('actual provider failures, redirects, broken bodies and truncated completions never return partial text',async()=>{
   for(const state of ['failure','partial','redirect','truncated','error','tools','no_finish','choice_error']){mode=state;await assert.rejects(run(),state);}
+});
+test('malformed provider accounting metadata is rejected before persistence', async () => {
+  for (const state of ['negative', 'fractional', 'string', 'overflow']) {
+    mode = state;
+    await assert.rejects(run(), state);
+  }
+});
+test('decoded NUL cannot reach native clipboard while ordinary formatting is preserved', async () => {
+  for (const state of ['nul', 'only_nul']) {
+    mode = state;
+    await assert.rejects(run(), /Incomplete translation/);
+  }
+  mode = 'formatting';
+  assert.equal((await run()).text, 'Hello\n\tworld');
 });

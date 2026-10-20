@@ -1,13 +1,6 @@
-# ARType fork
+# Corporate product constraints
 
-This fork implements the user's corporate ARType product. The upstream TypeTide
-brand, offline provider choices and public update feed are superseded here.
-Keep upstream license attribution. Provider credentials stay server-side.
-Use the Shift A logo and violet accent. Preserve native selection and clipboard
-behavior. Never describe unsigned builds or simulated OAuth as distribution ready.
-
-Server checks: `cd server && npm test` (requires TEST_DATABASE_URL).
-Client checks: Xcode TypeTide scheme and Windows `--selftest` in CI.
-Build packages using `scripts/build-artype-macos.sh SERVICE_URL --validation|--release`
-and `scripts/build-artype-windows.ps1 -ServiceUrl URL -Validation` (or certificate).
-Legacy upstream release scripts are not ARType distribution entry points.
+Use the ARType Shift A logo and violet accent. Follow `AGENTS.md` for the current
+managed architecture and verification commands. Upstream offline providers and
+public update feeds are historical. Preserve the MIT attribution, native
+selection/clipboard behavior and compatible user storage identifiers.

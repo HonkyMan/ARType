@@ -54,26 +54,3 @@ protocol TranslationProvider {
     /// 返回译文增量（流式）。调用方负责拼接。
     func stream(_ request: TranslationRequest) -> AsyncThrowingStream<String, Error>
 }
-
-/// 统一的提示词构造。支持风格（faithful 为纯翻译）。
-enum TranslationPrompt {
-    static func system(target: Language, source: Language?, style: RewriteStyle = .faithful) -> String {
-        let from = source?.promptName ?? "the detected language"
-        let styleLine = style.instruction.map { " " + $0 } ?? ""
-        return """
-        You are a professional translation engine. Translate the user's text from \(from) into \(target.promptName).\(styleLine) \
-        Output ONLY the translation, with no quotes, no explanations, no extra notes. Preserve the original meaning and formatting.
-        """
-    }
-
-    /// 用于不支持 system role 的纯 generate 接口
-    static func plain(_ text: String, target: Language, source: Language?, style: RewriteStyle = .faithful) -> String {
-        let from = source?.promptName ?? "the source language"
-        let styleLine = style.instruction.map { " " + $0 } ?? ""
-        return """
-        Translate the following text from \(from) to \(target.promptName).\(styleLine) Only output the translation, no explanation.
-
-        \(text)
-        """
-    }
-}

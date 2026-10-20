@@ -1,5 +1,5 @@
 //
-//  Language.h — 语言定义、提示词与检测（对应 macOS 的 LanguageConfig）。
+//  Language.h — language definitions and detection.
 //
 #pragma once
 #include <optional>
@@ -55,8 +55,6 @@ std::optional<Language> FromCode(const std::string& code);
 const wchar_t* DisplayName(Language l);
 /// 短名（"中文"）
 std::wstring ShortName(Language l);
-/// 提示词里用的英文名（"Chinese"）
-const char* PromptName(Language l);
 
 /// 检测文本主语言（脚本区段 + 拉丁语系停用词打分）。
 /// 无法确定时返回 nullopt，交由调用方走兜底方向。
@@ -71,7 +69,5 @@ ResolvedDirection ResolveDirection(const std::wstring& text, TranslationDirectio
 const char* StyleCode(RewriteStyle s);
 std::optional<RewriteStyle> StyleFromCode(const std::string& s);
 const wchar_t* StyleDisplayName(RewriteStyle s);
-/// 注入 prompt 的风格指令；Faithful 返回空串
-const char* StyleInstruction(RewriteStyle s);
 
 } // namespace lang

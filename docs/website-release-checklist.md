@@ -1,5 +1,9 @@
 # Website release checks
 
+> Archived upstream TypeTide checklist. It does not describe ARType deployment
+> or supported providers. See [ARCHIVE.md](ARCHIVE.md) and
+> [OPERATIONS.md](OPERATIONS.md) for the current product.
+
 macOS and Windows share release tags but may upload their assets at different times.
 The newest release is not necessarily a download source for both platforms.
 

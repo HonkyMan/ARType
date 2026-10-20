@@ -4,7 +4,7 @@
 
 namespace credentials {
 
-std::string LoadCloudApiKey();
-bool SaveCloudApiKey(const std::string& key);
+std::string LoadSessionToken();
+bool SaveSessionToken(const std::string& token);
 
 } // namespace credentials

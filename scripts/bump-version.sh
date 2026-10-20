@@ -68,7 +68,7 @@ rm -f "$ROOT/windows/src/TypeTide.rc.bumpbak"
 
 # Windows: manifest —— 只改应用自身的 assemblyIdentity，
 # 千万别碰 Common-Controls 依赖的 version="6.0.0.0"（改了会 SxS 启动失败）
-sed -i.bumpbak -E "s/(version=\")[0-9.]+(\" processorArchitecture=\"\*\" name=\"everettjf.TypeTide\")/\1$NEW.0\2/" \
+sed -i.bumpbak -E "s/(version=\")[0-9.]+(\" processorArchitecture=\"\*\" name=\"everettjf\.(TypeTide|ARType)\")/\1$NEW.0\2/" \
     "$ROOT/windows/src/TypeTide.manifest"
 rm -f "$ROOT/windows/src/TypeTide.manifest.bumpbak"
 

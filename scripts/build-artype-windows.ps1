@@ -7,16 +7,23 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $url=[uri]$ServiceUrl
-if ($url.UserInfo -or $url.Query -or $url.Fragment -or $url.AbsolutePath -ne '/') {throw 'Expected service origin'}
-if ($url.Scheme -ne 'https' -and !($Validation -and $url.IsLoopback)) {throw 'HTTPS required'}
+if (!$url.IsAbsoluteUri -or $url.UserInfo -or $url.OriginalString.Contains('?') -or $url.OriginalString.Contains('#') -or $url.AbsolutePath -ne '/') {throw 'Expected service origin'}
+if ($url.Scheme -ne 'https' -and !($Validation -and $url.Scheme -eq 'http' -and $url.IsLoopback)) {throw 'HTTPS required'}
 if (!$Validation -and ($url.IsLoopback -or !$CertificateThumbprint)) {throw 'Release requires public HTTPS URL and signing certificate'}
 cmake -S windows -B windows/build -A x64 "-DARTYPE_SERVICE_URL=$($ServiceUrl.TrimEnd('/'))"
 if ($LASTEXITCODE -ne 0) {throw 'Configure failed'}
 cmake --build windows/build --config Release
 if ($LASTEXITCODE -ne 0) {throw 'Build failed'}
-$env:TYPETIDE_DATA_DIR = Join-Path $env:TEMP ('artype-test-'+[guid]::NewGuid())
-$test=Start-Process windows/build/Release/ARType.exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
-if ($test.ExitCode -ne 0) {throw 'Self-tests failed'}
+$previousDataDirectory = $env:TYPETIDE_DATA_DIR
+$testDataDirectory = Join-Path $env:TEMP ('artype-test-'+[guid]::NewGuid())
+try {
+  $env:TYPETIDE_DATA_DIR = $testDataDirectory
+  $test=Start-Process windows/build/Release/ARType.exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+  if ($test.ExitCode -ne 0) {throw 'Self-tests failed'}
+} finally {
+  $env:TYPETIDE_DATA_DIR = $previousDataDirectory
+  if (Test-Path $testDataDirectory) {Remove-Item $testDataDirectory -Recurse -Force}
+}
 Copy-Item windows/build/Release/ARType.exe windows/build/ARType.exe -Force
 Copy-Item LICENSE windows/build/TypeTide-LICENSE.txt -Force
 if (!$Validation) {
@@ -40,5 +47,6 @@ if (!$Validation) {
   Move-Item $installer $new -Force
   $installer=$new
 }
-Get-FileHash $installer -Algorithm SHA256 | Format-List | Out-File "$installer.sha256"
+$hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+"$hash  $(Split-Path $installer -Leaf)" | Set-Content "$installer.sha256" -Encoding ascii
 Write-Output (Resolve-Path $installer)

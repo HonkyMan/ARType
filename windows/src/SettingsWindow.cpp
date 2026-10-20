@@ -3,14 +3,10 @@
 #include "Credentials.h"
 #include "SettingsWindow.h"
 #include "App.h"
-#include "BuiltInModel.h"
 #include "LaunchAtLogin.h"
 #include "LocalDiagnostics.h"
-#include "OllamaModels.h"
 #include "resource.h"
 #include "Settings.h"
-#include "Translator.h"
-#include "UpdateChecker.h"
 #include "Util.h"
 #include "UITheme.h"
 #include <commctrl.h>
@@ -20,38 +16,20 @@
 #include <uxtheme.h>
 #include <vsstyle.h>
 #include <string>
-#include <atomic>
 #include <memory>
-#include <thread>
 #include <vector>
 
 namespace {
 
 constexpr wchar_t kClassName[] = L"ARTypeSettings";
-// 工作线程取回 Ollama 模型列表：lParam = std::vector<std::wstring>*（接收方释放）
-constexpr UINT kMsgOllamaModels = WM_APP + 100;
-constexpr UINT kMsgUpdateResult = WM_APP + 101;
-constexpr UINT kMsgBackendHealth = WM_APP + 102;
-constexpr UINT kMsgBuiltInProgress = WM_APP + 103;
 constexpr UINT kMsgAccount = WM_APP + 104;
-
-struct BuiltInProgress {
-    double fraction = 0;
-    std::wstring status;
-    bool done = false;
-};
 
 enum CtrlId : int {
     kAccountLogin = 900, kAccountLogout, kAccountRefresh, kAccountCabinet, kAccountTenant, kAccountMessage, kAccountCancel,
     kTab = 1000,
     // General
-    kEnable, kLogin, kVersionLabel, kCheckUpdate, kFirstRunHint,
-    // Backend
-    kBackendBuiltIn, kBuiltInDownload, kBuiltInStatus, kBackendOllama, kBackendOpenAI,
-    kOllamaModelLabel, kOllamaModel, kOllamaRefresh, kOllamaHint,
-    kOaiProviderLabel, kOaiProvider,
-    kOaiUrlLabel, kOaiUrl, kOaiKeyLabel, kOaiKey, kOaiModelLabel, kOaiModel, kOaiHint, kPrivacyHint,
-    kBackendTest, kBackendStatus,
+    kEnable, kLogin, kVersionLabel, kUpdateNotice, kFirstRunHint,
+    kPrivacyHint,
     // Language
     kNativeLabel, kNative, kForeignLabel, kForeign,
     kReadDirLabel, kReadDir, kRewriteDirLabel, kRewriteDir, kLangWarn,
@@ -83,11 +61,9 @@ struct State {
     std::vector<std::vector<HWND>> pages;  // 每个 tab 页的控件
     bool loading = false;                  // 初始化填充时不触发保存
     bool saveWarningShown = false;
-    bool backendReady = false;
     bool shortcutsReady = false;
     bool dark = false;
     bool highContrast = false;
-    std::shared_ptr<std::atomic<bool>> modelDownloadCancel;
     int clientWidth = 0;
     int clientHeight = 0;
     std::vector<std::string> tenants;
@@ -258,10 +234,6 @@ void applyTheme(HWND hwnd) {
 
 void updateFirstRunCompletion() {
     Settings& s = Settings::shared();
-    if (!s.hasCompletedFirstLaunch && g.backendReady && g.shortcutsReady) {
-        s.hasCompletedFirstLaunch = true;
-        s.save();
-    }
     if (ctrl(kFirstRunHint)) {
         SetWindowTextW(ctrl(kFirstRunHint), s.hasCompletedFirstLaunch
             ? L"Setup checks complete. ARType is ready."
@@ -482,64 +454,6 @@ void updateShortcutControls() {
 
 // ---------- 页构建 ----------
 
-void updateBackendEnabled() {
-    const Settings& s = Settings::shared();
-    bool ollama = s.backend == TranslationBackend::Ollama;
-    bool cloud = s.backend == TranslationBackend::OpenAI;
-    EnableWindow(ctrl(kOllamaModel), ollama);
-    EnableWindow(ctrl(kOllamaRefresh), ollama);
-    EnableWindow(ctrl(kOaiProvider), cloud);
-    EnableWindow(ctrl(kOaiUrl), cloud);
-    EnableWindow(ctrl(kOaiKey), cloud);
-    EnableWindow(ctrl(kOaiModel), cloud);
-}
-
-void updateBuiltInStatus() {
-    if (!g.hwnd || !ctrl(kBuiltInDownload)) return;
-    const bool downloading = g.modelDownloadCancel != nullptr;
-    SetWindowTextW(ctrl(kBuiltInDownload), downloading ? L"Cancel download" :
-                   builtin::Installed() ? L"Model ready" : L"Download model · 2.49 GB");
-    EnableWindow(ctrl(kBuiltInDownload), downloading || !builtin::Installed());
-    if (!downloading)
-        SetWindowTextW(ctrl(kBuiltInStatus), builtin::Installed()
-            ? L"Ready for private offline translation · Faithful only"
-            : L"One-time download from Hugging Face; selected text stays on this PC.");
-}
-
-int cloudProviderIndex(const std::string& baseUrl) {
-    if (baseUrl.find("api.openai.com") != std::string::npos) return 0;
-    if (baseUrl.find("openrouter.ai") != std::string::npos) return 1;
-    if (baseUrl.find("api.deepseek.com") != std::string::npos) return 2;
-    return 3;
-}
-
-void applyCloudProviderPreset(int index) {
-    Settings& s = Settings::shared();
-    switch (index) {
-    case 0:
-        s.openAIBaseURL = "https://api.openai.com/v1";
-        s.openAIModel = "gpt-5-mini";
-        break;
-    case 1:
-        s.openAIBaseURL = "https://openrouter.ai/api/v1";
-        s.openAIModel = "openai/gpt-5-mini";
-        break;
-    case 2:
-        s.openAIBaseURL = "https://api.deepseek.com";
-        s.openAIModel = "deepseek-v4-flash";
-        break;
-    default:
-        return;
-    }
-    SetWindowTextW(ctrl(kOaiUrl), util::Widen(s.openAIBaseURL).c_str());
-    SetWindowTextW(ctrl(kOaiModel), util::Widen(s.openAIModel).c_str());
-}
-
-/// 后台拉取已装模型列表，回主线程填充下拉框（Settings 快照在主线程拍好）
-void fetchOllamaModelsAsync() {
-    ollamamodels::FetchInstalledAsync(g.hwnd, kMsgOllamaModels);
-}
-
 void updateLangWarn() {
     const Settings& s = Settings::shared();
     SetWindowTextW(ctrl(kLangWarn),
@@ -574,7 +488,7 @@ void buildPages() {
         make(L"BUTTON", L"Launch at login", WS_TABSTOP | BS_AUTOCHECKBOX, x, y + 88, 180, 22, kLogin),
         makeLabel(L"UPDATES", x, y + 150, w, -1, true),
         makeLabel(L"Version " TYPETIDE_VERSION_STRING, x, y + 178, 200, kVersionLabel),
-        makeLabel(L"Обновления предоставляет администратор организации.", x, y + 206, w, kCheckUpdate),
+        makeLabel(L"Обновления предоставляет администратор организации.", x, y + 206, w, kUpdateNotice),
         makeLabel(L"", x, y + 258, w, kFirstRunHint),
     };
     g.pages[0].insert(g.pages[0].end(), controls.begin(), controls.end());
@@ -603,7 +517,7 @@ void buildPages() {
         SetWindowPos(ctrl(kAccountMessage),nullptr,px(x),px(y+130),px(w),px(85),SWP_NOZORDER);
         SetWindowPos(ctrl(kPrivacyHint),nullptr,px(x),px(y+355),px(w),px(60),SWP_NOZORDER);
         EnableWindow(ctrl(kAccountCancel),FALSE);
-        auto token=credentials::LoadCloudApiKey();
+        auto token=credentials::LoadSessionToken();
         if(!token.empty())account::FetchProfile(g.hwnd,kMsgAccount,token);
     }
 
@@ -804,20 +718,20 @@ void onCommand(int id, int code) {
         account::Cancel();EnableWindow(ctrl(kAccountLogin),TRUE);EnableWindow(ctrl(kAccountCancel),FALSE);
         SetWindowTextW(ctrl(kAccountMessage),L"Вход отменён.");return;
     case kAccountRefresh:
-        account::FetchProfile(g.hwnd,kMsgAccount,credentials::LoadCloudApiKey());return;
+        account::FetchProfile(g.hwnd,kMsgAccount,credentials::LoadSessionToken());return;
     case kAccountCabinet:
         ShellExecuteW(g.hwnd,L"open",util::Widen(account::ServiceURL()).c_str(),nullptr,nullptr,SW_SHOWNORMAL);return;
     case kAccountLogout: {
-        auto token=credentials::LoadCloudApiKey();
-        if(!credentials::SaveCloudApiKey("")) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось удалить сессию из Credential Manager.");return;}
+        auto token=credentials::LoadSessionToken();
+        if(!credentials::SaveSessionToken("")) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось удалить сессию из Credential Manager.");return;}
         account::Logout(g.hwnd,kMsgAccount,token);App::shared().cancelTranslations();
-        s.tenantId.clear();s.openAIKey.clear();g.tenants.clear();
+        s.tenantId.clear();g.tenants.clear();
         SendMessageW(ctrl(kAccountTenant),CB_RESETCONTENT,0,0);s.save();
         SetWindowTextW(ctrl(kAccountMessage),L"Вы вышли из ARType.");return;
     }
     case kAccountTenant:
         if(code==CBN_SELCHANGE){auto index=(int)SendMessageW(ctrl(kAccountTenant),CB_GETCURSEL,0,0);
-            if(index>=0 && index<(int)g.tenants.size()){App::shared().cancelTranslations();s.tenantId=g.tenants[index];s.save();account::FetchProfile(g.hwnd,kMsgAccount,credentials::LoadCloudApiKey());}}
+            if(index>=0 && index<(int)g.tenants.size()){App::shared().cancelTranslations();s.tenantId=g.tenants[index];s.save();account::FetchProfile(g.hwnd,kMsgAccount,credentials::LoadSessionToken());}}
         return;
     case kTab:
         if (code == LBN_SELCHANGE)
@@ -831,98 +745,6 @@ void onCommand(int id, int code) {
         launchatlogin::SetEnabled(IsDlgButtonChecked(g.hwnd, kLogin) == BST_CHECKED);
         save = false;
         break;
-    case kCheckUpdate:
-        EnableWindow(ctrl(kCheckUpdate), FALSE);
-        SetWindowTextW(ctrl(kCheckUpdate), L"Checking…");
-        updatechecker::CheckNowInteractive(g.hwnd, kMsgUpdateResult);
-        save = false;
-        break;
-
-    case kBackendBuiltIn:
-    case kBackendOllama:
-    case kBackendOpenAI:
-        s.backend = id == kBackendBuiltIn ? TranslationBackend::BuiltIn
-                  : id == kBackendOllama ? TranslationBackend::Ollama : TranslationBackend::OpenAI;
-        updateBackendEnabled();
-        break;
-    case kBuiltInDownload:
-        if (g.modelDownloadCancel) {
-            g.modelDownloadCancel->store(true);
-        } else if (!builtin::Installed()) {
-            auto cancel = std::make_shared<std::atomic<bool>>(false);
-            g.modelDownloadCancel = cancel;
-            updateBuiltInStatus();
-            HWND target = g.hwnd;
-            std::thread([cancel, target] {
-                std::wstring error;
-                auto send = [target](double fraction, const std::wstring& status, bool done) {
-                    auto* payload = new BuiltInProgress{fraction, status, done};
-                    if (!PostMessageW(target, kMsgBuiltInProgress, 0, (LPARAM)payload)) delete payload;
-                };
-                ULONGLONG lastProgressTick = 0;
-                std::wstring lastProgressStatus;
-                bool ok = builtin::Download(*cancel, [&](double fraction, const std::wstring& status) {
-                    // Network reads can arrive thousands of times per second.
-                    // Limit queued UI updates, but show each new phase immediately.
-                    const ULONGLONG now = GetTickCount64();
-                    if (status == lastProgressStatus && now - lastProgressTick < 200) return;
-                    lastProgressTick = now;
-                    lastProgressStatus = status;
-                    send(fraction, status, false);
-                }, &error);
-                send(ok ? 1.0 : 0.0, ok ? L"Model ready for offline translation" : error, true);
-            }).detach();
-        }
-        save = false;
-        break;
-    case kOllamaModel:
-        if (code == CBN_SELCHANGE) {
-            int sel = (int)SendMessageW(ctrl(kOllamaModel), CB_GETCURSEL, 0, 0);
-            if (sel < 0) return;
-            int len = (int)SendMessageW(ctrl(kOllamaModel), CB_GETLBTEXTLEN, sel, 0);
-            std::wstring m(len, 0);
-            SendMessageW(ctrl(kOllamaModel), CB_GETLBTEXT, sel, (LPARAM)m.data());
-            s.ollamaModel = util::Narrow(m);
-        } else if (code == CBN_EDITCHANGE) {
-            s.ollamaModel = util::Narrow(editText(ctrl(kOllamaModel)));
-        } else {
-            return;
-        }
-        break;
-    case kOllamaRefresh:
-        fetchOllamaModelsAsync();
-        save = false;
-        break;
-    case kOaiProvider:
-        if (code != CBN_SELCHANGE) return;
-        applyCloudProviderPreset((int)SendMessageW(ctrl(kOaiProvider), CB_GETCURSEL, 0, 0));
-        break;
-    case kOaiUrl:
-        if (code != EN_CHANGE) return;
-        s.openAIBaseURL = util::Narrow(editText(ctrl(kOaiUrl)));
-        break;
-    case kOaiKey:
-        if (code != EN_KILLFOCUS) return;
-        s.openAIKey = util::Narrow(editText(ctrl(kOaiKey)));
-        break;
-    case kOaiModel:
-        if (code != EN_CHANGE) return;
-        s.openAIModel = util::Narrow(editText(ctrl(kOaiModel)));
-        break;
-    case kBackendTest:
-        EnableWindow(ctrl(kBackendTest), FALSE);
-        SetWindowTextW(ctrl(kBackendTest), L"Testing…");
-        SetWindowTextW(ctrl(kBackendStatus), L"Connecting and translating synthetic text…");
-        {
-        HWND target = g.hwnd;
-        translator::CheckHealthAsync([target](translator::HealthCheckResult result) {
-            auto* payload = new translator::HealthCheckResult(std::move(result));
-            if (!PostMessageW(target, kMsgBackendHealth, 0, (LPARAM)payload)) delete payload;
-        });
-        }
-        save = false;
-        break;
-
     case kNative:
         if (code != CBN_SELCHANGE) return;
         s.nativeLanguage = comboLanguage(ctrl(kNative));
@@ -1159,14 +981,13 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             layoutForClientSize(LOWORD(lp), HIWORD(lp));
         return 0;
     case kMsgAccount: {
-        std::unique_ptr<account::Update> u(reinterpret_cast<account::Update*>(lp));
+        auto u = account::TakeUpdate(lp);
         if(!u || !account::Current(u->generation))return 0;
         if(u->finished){EnableWindow(ctrl(kAccountLogin),TRUE);EnableWindow(ctrl(kAccountCancel),FALSE);}
         if(!u->message.empty())SetWindowTextW(ctrl(kAccountMessage),u->message.c_str());
         if(!u->token.empty()){
             App::shared().cancelTranslations();
-            if(!credentials::SaveCloudApiKey(u->token)) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось сохранить сессию в Credential Manager.");return 0;}
-            Settings::shared().openAIKey=u->token;
+            if(!credentials::SaveSessionToken(u->token)) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось сохранить сессию в Credential Manager.");return 0;}
             account::FetchProfile(hwnd,kMsgAccount,u->token);
         }
         if(u->profile.isObject())SettingsWindow::applyAccountProfile(u->profile);
@@ -1175,83 +996,6 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND:
         onCommand(LOWORD(wp), HIWORD(wp));
         return 0;
-    case kMsgOllamaModels: {
-        auto* models = (std::vector<std::wstring>*)lp;
-        ollamamodels::ApplyResolvedModels(*models);
-        HWND combo = ctrl(kOllamaModel);
-        if (combo) {
-            std::wstring current = util::Widen(Settings::shared().ollamaModel);
-            SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-            for (auto& m : *models)
-                SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)m.c_str());
-            SetWindowTextW(combo, current.c_str());
-        }
-        ULONGLONG memoryKb = 0;
-        double cap = 0;
-        const uint64_t memoryBytes = GetPhysicallyInstalledSystemMemory(&memoryKb)
-            ? (uint64_t)memoryKb * 1024 : 16ULL * 1024 * 1024 * 1024;
-        const std::wstring recommended = ollamamodels::RecommendedForMemory(*models, memoryBytes, &cap);
-        if (!recommended.empty()) {
-            std::wstring hint = L"Recommended for this PC: " + recommended +
-                L" (comfortable target up to about " + std::to_wstring((int)cap) +
-                L"B). Ollama runs locally.";
-            SetWindowTextW(ctrl(kOllamaHint), hint.c_str());
-        }
-        ollamamodels::PreloadAsync();
-        delete models;
-        return 0;
-    }
-    case kMsgUpdateResult:
-        EnableWindow(ctrl(kCheckUpdate), TRUE);
-        SetWindowTextW(ctrl(kCheckUpdate), L"Check for updates");
-        if (wp == 1) {
-            if (MessageBoxW(hwnd, L"A new ARType version is available. Open the download page?",
-                            L"ARType update", MB_YESNO | MB_ICONINFORMATION) == IDYES)
-                updatechecker::OpenReleasesPage();
-        } else if (wp == 0) {
-            MessageBoxW(hwnd, L"You're using the latest version.", L"ARType update",
-                        MB_OK | MB_ICONINFORMATION);
-        } else {
-            MessageBoxW(hwnd,
-                        L"ARType couldn't check for updates. Check your internet connection and try again.",
-                        L"ARType update", MB_OK | MB_ICONWARNING);
-        }
-        return 0;
-    case kMsgBackendHealth: {
-        auto* result = (translator::HealthCheckResult*)lp;
-        EnableWindow(ctrl(kBackendTest), TRUE);
-        SetWindowTextW(ctrl(kBackendTest), L"Test connection");
-        std::wstring status = result->message;
-        if (result->ok) {
-            status += L"  ";
-            if (result->firstTokenMs >= 0)
-                status += L"First token " + std::to_wstring(result->firstTokenMs) + L" ms · ";
-            status += L"Total " + std::to_wstring(result->totalMs) + L" ms";
-        }
-        SetWindowTextW(ctrl(kBackendStatus), status.c_str());
-        g.backendReady = result->ok;
-        updateFirstRunCompletion();
-        delete result;
-        return 0;
-    }
-    case kMsgBuiltInProgress: {
-        auto* progress = reinterpret_cast<BuiltInProgress*>(lp);
-        if (progress->done) g.modelDownloadCancel.reset();
-        if (g.hwnd && ctrl(kBuiltInStatus)) {
-            std::wstring status = progress->status;
-            if (!progress->done) status += L" " + std::to_wstring(int(progress->fraction * 100)) + L"%";
-            // WM_SETTEXT repaints a STATIC even when the text is unchanged.
-            // Keep the label stable between visible percentage changes.
-            if (editText(ctrl(kBuiltInStatus)) != status)
-                SetWindowTextW(ctrl(kBuiltInStatus), status.c_str());
-            if (progress->done) {
-                updateBuiltInStatus();
-                if (!builtin::Installed()) SetWindowTextW(ctrl(kBuiltInStatus), status.c_str());
-            }
-        }
-        delete progress;
-        return 0;
-    }
     case WM_NOTIFY: {
         auto* hdr = (NMHDR*)lp;
         if (g.dark && !g.highContrast && hdr->code == NM_CUSTOMDRAW) {
@@ -1338,10 +1082,6 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         account::Cancel();
-        if (g.modelDownloadCancel) {
-            g.modelDownloadCancel->store(true);
-            g.modelDownloadCancel.reset();
-        }
         if (g.font) { DeleteObject(g.font); g.font = nullptr; }
         if (g.fontBold) { DeleteObject(g.fontBold); g.fontBold = nullptr; }
         if (g.fontTitle) { DeleteObject(g.fontTitle); g.fontTitle = nullptr; }
@@ -1541,8 +1281,6 @@ void open(HWND appWindow, bool showShortcuts) {
     showPage(initialPage);
     g.loading = false;
     refreshShortcutStatus();
-
-    // 异步填充 Ollama 模型下拉框
 
     SetForegroundWindow(g.hwnd);
 }

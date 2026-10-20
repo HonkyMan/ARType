@@ -1,5 +1,6 @@
 //
-//  CrashDump.h — 未处理异常时写 minidump 到 %APPDATA%\ARType\crashes\。
+//  CrashDump.h — local numeric crash metadata in %APPDATA%\ARType\crashes\.
+//  No process memory, addresses, exception parameters, or automatic upload.
 //
 #pragma once
 

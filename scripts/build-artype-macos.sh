@@ -8,7 +8,7 @@ python3 - "$service_url" "$mode" <<'PY'
 import sys
 from urllib.parse import urlsplit
 u=urlsplit(sys.argv[1]); local=u.hostname in ('127.0.0.1','localhost','::1')
-assert u.hostname and not u.username and not u.password and not u.query and not u.fragment and u.path in ('','/'), 'Expected server origin'
+assert u.hostname and not u.username and not u.password and '?' not in sys.argv[1] and '#' not in sys.argv[1] and u.path in ('','/'), 'Expected server origin'
 assert u.scheme=='https' or (sys.argv[2]=='--validation' and local and u.scheme=='http'), 'HTTPS required'
 assert sys.argv[2]!='--release' or not local, 'Release must use public HTTPS service'
 PY
@@ -30,7 +30,7 @@ Path(sys.argv[2]).write_text(json.dumps({'service_url':sys.argv[1].rstrip('/')})
 PY
 xcodebuild -project macos/TypeTide.xcodeproj -scheme TypeTide -configuration Release \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath "$derived" \
-  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile -jobs 4 \
+  -jobs 4 \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= \
   COMPILER_INDEX_STORE_ENABLE=NO build
 app="$derived/Build/Products/Release/ARType.app"
@@ -59,5 +59,5 @@ if [[ "$mode" = --release ]]; then
   xcrun stapler staple "$out/$label.dmg"
   spctl -a -t open --context context:primary-signature -v "$out/$label.dmg"
 fi
-shasum -a 256 "$out/$label.dmg" > "$out/$label.dmg.sha256"
+(cd "$out" && shasum -a 256 "$label.dmg" > "$label.dmg.sha256")
 echo "$out/$label.dmg"

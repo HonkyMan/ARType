@@ -8,8 +8,6 @@
 #include <string>
 #include <vector>
 
-enum class TranslationBackend { BuiltIn, Ollama, OpenAI };
-
 /// 划词触发方式
 enum class SelectionTrigger {
     None,  // 仅快捷键
@@ -38,18 +36,7 @@ struct Hotkey {
 
 struct Settings {
     bool enabled = true;
-    TranslationBackend backend = TranslationBackend::OpenAI;
     std::string tenantId;
-
-    // Ollama
-    std::string ollamaHost = "http://127.0.0.1";
-    int ollamaPort = 11434;
-    std::string ollamaModel = "qwen2.5:3b";
-
-    // OpenAI 兼容
-    std::string openAIBaseURL = "https://api.openai.com/v1";
-    std::string openAIKey;
-    std::string openAIModel = "gpt-5-mini";
 
     // 语言（native = 母语，foreign = 外语）
     Language nativeLanguage = Language::Russian;
@@ -73,7 +60,6 @@ struct Settings {
     std::vector<std::wstring> skipApps;
 
     bool hasCompletedFirstLaunch = false;
-    long long lastUpdateCheck = 0;  // Unix 秒
 
     // --- 持久化 ---
     static Settings& shared();
