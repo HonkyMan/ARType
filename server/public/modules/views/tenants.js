@@ -78,8 +78,8 @@ return `<section class="panel">
       <div class="panel-head">
       <h2>${tr('invite_member_365')}</h2>
       </div>
-      <p class="legal">${tr('invitation_is_free')}</p>
       <form class="panel-body" data-form="invite" data-tenant-id="${t.id}">
+      <p class="legal">${tr('invitation_is_free')}</p>
       <div class="inline-form">
       <label>Google email<input type="email" name="email" placeholder="colleague@company.com" required>
       </label>
