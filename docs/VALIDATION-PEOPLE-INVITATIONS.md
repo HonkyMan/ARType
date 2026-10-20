@@ -41,12 +41,35 @@ its workspace. Email entry by Tab, space and comma produced normalized tags;
 pasted mixed lists combined a duplicate, displayed an invalid tag and blocked
 submission with the explicit validation message.
 
-Further browser acceptance was interrupted by another Chrome extension's open
-UI. The user was asked to dismiss it. Immediate-connect checkbox interaction,
-final invitation modal, directory layout and mobile layout have **not** been
-visually verified in this revision. Their API/renderer/navigation behavior is
-covered by the automated checks above. This limitation is not a claim that the
-remaining browser acceptance passed.
+After the Chrome extension popup was dismissed, the remaining browser checks
+completed on the same isolated preview database:
+
+- Immediate connection at zero balance showed three new seats × $5 = $15,
+  skipped the existing owner and disabled confirmation. The deposit form was
+  prefilled with $15, and returning to the team restored all four email tags.
+- Fixture credit `QA-SIMULATED-INVITATIONS-20261020` funded exactly $15. Confirming
+  the three invitations created paid seats, leaving balance $0. The existing
+  owner retained management-only access and their owner role.
+- A second batch of two invitations with immediate connection off completed at
+  zero balance. Both employees appeared as Not connected, without a seat charge.
+- The operator directory displayed the owner once, with both Personal and
+  Business marks and two organizations. The combined filter returned one row.
+- With 60 additional fixture identities, search returned 50 rows on page 1 and
+  the remaining 10 on page 2, starting at identity 051. English and Russian
+  navigation, search and filter labels were inspected.
+- Personal subscription management opened from the person's row. Workspace cards
+  listed only the two Business organizations; no customer-specific sidebar items
+  appeared for the operator.
+- At 390 × 844, the invitation form, confirmation dialog and directory rendered
+  within the viewport. Document width was 375px with a vertical scrollbar and
+  no horizontal overflow. The temporary viewport override was reset afterward.
+
+Screenshots are retained in `.local/qa/people-invitations/`, including
+`directory-both-ru.png`, `confirm-ru.png`, `connected-ru.png`,
+`mobile-form-ru.png`, `mobile-confirm-ru.png` and `mobile-directory-en.png`.
+The console contained two autofill-extension errors attributed to its own
+`chrome-extension://` script; no application-script errors were observed.
+No product-code changes were needed during the resumed browser acceptance.
 
 The local Docker build is deployed at `http://127.0.0.1:8080`. API and database
 report healthy; all **33 public assets** and **42 server files** match the source.
