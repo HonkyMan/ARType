@@ -58,7 +58,7 @@ Docker image `node:24-bookworm-slim`; первый запуск и сборка 
 
 С флагом `--domain translate.company.com` выбирается HTTPS/Caddy `compose.yaml`.
 Redirect тогда равен `https://translate.company.com/auth/google/callback`.
-После Google-входа откройте **AI-провайдер**, введите API-ключ и сохраните
+После Google-входа откройте **Настройки платформы → AI-подключения**, введите API-ключ и сохраните
 подключение `main`. Ключ можно менять там же без перезапуска сервера. Значение
 не возвращается в браузер; PostgreSQL хранит его в AES-256-GCM шифротексте.
 Модель новых организаций — `google/gemma-3-4b-it`; задайте другую через

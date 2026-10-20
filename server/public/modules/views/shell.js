@@ -2,12 +2,14 @@ import {brand, button, esc} from '../format.js';
 
 export function createShell({state, document, setTimeout}) {
   const root = document.querySelector('#app');
+  let toastVersion = 0;
 
   function toast(text) {
+    const version = ++toastVersion;
     const target = document.querySelector('#toast');
     target.textContent = text;
     target.hidden = false;
-    setTimeout(() => { target.hidden = true; }, 4500);
+    setTimeout(() => { if (version === toastVersion) target.hidden = true; }, 6000);
   }
 
   function showError(error) {
@@ -20,11 +22,28 @@ export function createShell({state, document, setTimeout}) {
     }
     target.textContent = error.message;
     target.hidden = false;
+    target.focus?.();
     toast(error.message);
   }
 
-function login() {
+  const hasUnsavedChanges = () => !!root.querySelector('form[data-dirty="true"]');
 
+  function confirmDiscard() {
+    const dialog = document.querySelector('#discard-dialog');
+    if (dialog.open) return Promise.resolve(false);
+    return new Promise(resolve => {
+      dialog.returnValue = 'cancel';
+      dialog.addEventListener('close', () => {
+        const discard = dialog.returnValue === 'discard';
+        if (discard) root.querySelectorAll('form[data-dirty]').forEach(form => delete form.dataset.dirty);
+        resolve(discard);
+      }, {once: true});
+      dialog.showModal();
+    });
+  }
+
+function login() {
+  document.title = 'Вход · ARType';
   root.innerHTML=`<div class="login">
       <section class="login-art">${brand}<div class="hero">
       <div class="eyebrow">Язык больше не барьер</div>
@@ -58,19 +77,30 @@ function shell(content,title,description,actions='') {
   const {me, current, section} = state;
 
   if (!me) return;
+  const nav = (label, action, selected) => `<button type="button" class="navitem ${selected ? 'active' : ''}" data-action="${action}" ${selected ? 'aria-current="page"' : ''}>${label}</button>`;
+  document.title = `${title} · ARType`;
   root.innerHTML=`<div class="shell">
-      <aside class="sidebar">${brand}<div class="eyebrow">Управление</div>
-      <nav>${me.operator?button('▦ &nbsp; Dashboard','dashboard',`navitem ${section==='dashboard'?'active':''}`):''}${button('◈ &nbsp; Рабочие пространства','home',`navitem ${!current&&section==='home'?'active':''}`)}${me.tenants.map(t=>`<button class="navitem ${current===t.id?'active':''}" data-tenant="${t.id}">${esc(t.name)}</button>`).join('')}${me.operator?button('◇ &nbsp; AI-провайдеры','provider',`navitem ${section.startsWith('provider')?'active':''}`)+button('⚙ &nbsp; Администраторы','admins',`navitem ${section==='admins'?'active':''}`):''}${button('↗ &nbsp; Установка и помощь','help','navitem')}</nav>
+      <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+      <aside class="sidebar"><div class="sidebar-header">${brand}<button type="button" class="mobile-menu quiet" data-action="toggle-menu" aria-expanded="false" aria-controls="main-navigation">Меню</button></div>
+      <nav id="main-navigation" aria-label="Основная навигация"><div class="nav-group"><div class="eyebrow">Работа</div>
+      ${me.operator ? nav('Обзор платформы', 'dashboard', section === 'dashboard') : ''}
+      ${nav('Организации', 'home', ['home', 'new-tenant'].includes(section))}
+      ${me.tenants.map(t=>`<button type="button" class="navitem tenant-nav ${current===t.id?'active':''}" data-tenant="${t.id}" ${current===t.id?'aria-current="page"':''}>${esc(t.name)}</button>`).join('')}</div>
+      ${me.operator ? `<div class="nav-group"><div class="eyebrow">Настройки платформы</div>
+      ${nav('AI-подключения', 'provider', section.startsWith('provider'))}
+      ${nav('Тариф', 'pricing', section === 'pricing')}
+      ${nav('Администраторы', 'admins', section === 'admins')}</div>` : ''}
+      <div class="nav-group">${nav('Установка и помощь', 'help', section === 'help')}</div></nav>
       <footer><span>Вы вошли как</span>
       <div class="identity"><span class="avatar">${esc(me.user.name.slice(0,1))}</span>
       <div>${esc(me.user.name)}<br><small>${esc(me.user.email)}</small>
       </div>
       </div>${button('Выйти','logout','quiet small')}</footer>
       </aside>
-      <main class="workspace">
-      <div class="topline"><span>ARType &nbsp; / &nbsp; ${esc(current?me.tenants.find(t=>t.id===current)?.name:'Кабинет')}</span><span><span class="dot"></span>${me.operator?'Администратор платформы':'Корпоративный доступ'}</span>
+      <main class="workspace" id="main-content" tabindex="-1">
+      <div class="topline"><span>ARType &nbsp; / &nbsp; ${current?'Организация':'Кабинет'}</span><span><span class="dot"></span>${me.operator?'Администратор платформы':'Корпоративный доступ'}</span>
       </div>
-      <div id="page-error" class="error" hidden>
+      <div id="page-error" class="error" role="alert" tabindex="-1" hidden>
       </div>
       <div class="heading">
       <div>
@@ -79,7 +109,8 @@ function shell(content,title,description,actions='') {
       <p>${esc(description)}</p>
       </div>${actions}</div>${content}</main>
       </div>`;
+  if (!content.includes('class="loading"')) document.querySelector('#main-content')?.focus?.({preventScroll: true});
 }
 
-  return {root, toast, showError, login, shell};
+  return {root, toast, showError, login, shell, hasUnsavedChanges, confirmDiscard};
 }

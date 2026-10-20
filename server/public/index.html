@@ -1,4 +1,17 @@
 <!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>ARType · Рабочее пространство</title><link rel="icon" href="/assets/artype-mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
-<body><div id="app" aria-live="polite"><div class="loading">Подключаем рабочее пространство…</div></div><div id="toast" role="status" hidden></div></body></html>
+<body>
+<div id="app"><div class="loading" role="status">Подключаем рабочее пространство…</div></div>
+<div id="toast" role="status" hidden></div>
+<dialog id="discard-dialog" aria-labelledby="discard-title" aria-describedby="discard-description">
+  <form method="dialog">
+    <h2 id="discard-title">Есть несохранённые изменения</h2>
+    <p id="discard-description">Сохраните форму перед переходом или отмените внесённые изменения.</p>
+    <div class="actions">
+      <button value="cancel" autofocus>Продолжить редактирование</button>
+      <button value="discard" class="quiet danger">Уйти без сохранения</button>
+    </div>
+  </form>
+</dialog>
+</body></html>

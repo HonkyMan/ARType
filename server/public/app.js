@@ -19,3 +19,9 @@ void application.start();
 window.addEventListener('popstate', () => {
   void application.start();
 });
+window.addEventListener('beforeunload', event => {
+  if (document.querySelector('form[data-dirty="true"]')) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});

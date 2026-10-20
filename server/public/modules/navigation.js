@@ -25,8 +25,9 @@ export function createNavigation({state, api, views, location, history, balanceJ
     }
   }
 
-  async function home() {
-    const ticket = begin('home', 'Рабочие пространства', null, location.hash === '#new-tenant' ? '#new-tenant' : '#home');
+  async function home(create = false) {
+    if (create && !state.me?.operator) create = false;
+    const ticket = begin(create ? 'new-tenant' : 'home', create ? 'Новая организация' : 'Организации', null, create ? '#new-tenant' : '#home');
     if (!ticket) return;
     const data = state.me.operator
       ? await load(ticket, api.request('/api/tenants'))
@@ -36,14 +37,22 @@ export function createNavigation({state, api, views, location, history, balanceJ
     state.credentials = data.credentials || [];
     state.connections = data.connections || [];
     state.defaultModel = data.default_model || '';
-    views.home();
+    if (create) views.newTenant();
+    else views.home();
   }
 
   async function dashboardPage() {
     if (!state.me?.operator) return home();
-    const ticket = begin('dashboard', 'Dashboard');
+    const ticket = begin('dashboard', 'Обзор платформы');
     const data = await load(ticket, api.request('/api/dashboard'));
     if (state.isCurrent(ticket)) views.dashboard(data);
+  }
+
+  async function pricingPage() {
+    if (!state.me?.operator) return home();
+    const ticket = begin('pricing', 'Тариф платформы');
+    const data = await load(ticket, api.request('/api/billing-settings'));
+    if (state.isCurrent(ticket)) views.pricing(data);
   }
 
   async function providerPage() {
@@ -87,7 +96,7 @@ export function createNavigation({state, api, views, location, history, balanceJ
     if (!signedIn()) return;
     const tenant = state.me.tenants.find(item => item.id === id);
     if (!tenant && !state.me.operator) return home();
-    if (!['team', 'settings', 'usage', 'billing'].includes(section)) section = 'team';
+    if (!['team', 'translation', 'settings', 'usage', 'billing'].includes(section)) section = 'team';
     const ticket = begin(section, 'Рабочее пространство', id, `#tenants/${encodeURIComponent(id)}/${section}`);
     if (tenant?.role === 'member') {
       const data = await load(ticket, api.request('/api/downloads'));
@@ -110,6 +119,18 @@ export function createNavigation({state, api, views, location, history, balanceJ
       state.credentials = state.connections.map(connection => connection.alias);
     }
     state.details = details;
+    // Keep the navigation name current after a rename, without losing session data.
+    const membership = state.me.tenants.find(item => item.id === id);
+    if (membership) membership.name = details.tenant.name;
+    views.renderTenant();
+  }
+
+  function tenantSection(section) {
+    if (!state.details || !['team', 'translation', 'settings', 'usage', 'billing'].includes(section)) return;
+    const details = state.details;
+    state.navigate(section, state.current);
+    state.details = details;
+    history.pushState({}, '', `#tenants/${encodeURIComponent(state.current)}/${section}`);
     views.renderTenant();
   }
 
@@ -154,13 +175,28 @@ export function createNavigation({state, api, views, location, history, balanceJ
     if (hash === '#providers/new') return providerEditorPage();
     const providerMatch = /^#providers\/([a-zA-Z0-9_-]+)\/edit$/.exec(hash);
     if (providerMatch) return providerEditorPage(providerMatch[1]);
-    const tenantMatch = /^#tenants\/([a-f0-9-]+)\/(team|settings|usage|billing)$/.exec(hash);
+    const tenantMatch = /^#tenants\/([a-f0-9-]+)\/(team|translation|settings|usage|billing)$/.exec(hash);
     if (tenantMatch) return openTenant(tenantMatch[1], tenantMatch[2]);
     if (hash === '#admins') return adminsPage();
+    if (hash === '#pricing') return pricingPage();
     if (hash === '#help') return helpPage();
-    if (hash === '#home' || hash === '#new-tenant') return home();
+    if (hash === '#home') return home();
+    if (hash === '#new-tenant') return home(true);
     return state.me?.operator ? dashboardPage() : home();
   }
 
-  return {start, route, home, dashboardPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant};
+  const pages = {start, route, home, newTenantPage: () => home(true), dashboardPage, pricingPage, providerPage, providerEditorPage, adminsPage, helpPage, openTenant, tenantSection};
+  let renderedHash = location.hash;
+  return Object.fromEntries(Object.entries(pages).map(([name, navigate]) => [name, (...args) => {
+    const proceed = async () => {
+      try { return await navigate(...args); }
+      finally { renderedHash = location.hash; }
+    };
+    // Do not delay clean navigation: request tickets are captured synchronously.
+    if (!views.hasUnsavedChanges()) return proceed();
+    return views.confirmDiscard().then(confirmed => {
+      if (confirmed) return proceed();
+      if (location.hash !== renderedHash) history.pushState({}, '', renderedHash);
+    });
+  }]));
 }

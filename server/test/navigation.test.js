@@ -86,12 +86,12 @@ function browserFixture(storage = browserStorage(), hash = '') {
     if (profile.operator && location.hash === '#dashboard') await settle(next('/api/dashboard'), dashboard);
     await ready;
   };
-  const click = dataset => listeners.click({target: {closest: () => ({dataset, isConnected: false})}});
+  const click = dataset => listeners.click({target: {closest: selector => selector === 'button' ? {dataset, isConnected: false} : null}});
   const form = (kind, values, tenant) => {
     const submit = {disabled: false, isConnected: true};
     return {
       dataset: {form: kind, ...(tenant ? {tenantId: tenant} : {})}, values,
-      querySelector: selector => selector === 'button' ? submit : selector === '[data-languages]' && Array.isArray(values.languages) ? {} : null,
+      querySelector: selector => selector === 'button[type="submit"], button:not([type])' ? submit : selector === '[data-languages]' && Array.isArray(values.languages) ? {} : null,
       reset() { this.values = {}; },
     };
   };
@@ -110,7 +110,7 @@ test('provider list links to a separate editor, saves changes, and returns to th
   const listing = app.application.providerPage();
   await app.settle(app.next('/api/provider-credentials'), connections);
   await listing;
-  assert.match(app.root.innerHTML, /<table class="connections-table">/);
+  assert.match(app.root.innerHTML, /<table class="connections-table"/);
   assert.doesNotMatch(app.root.innerHTML, /data-form="provider"/);
   const edit = app.click({editProvider:'main'});
   await app.settle(app.next('/api/provider-credentials'), connections);
@@ -173,6 +173,10 @@ test('workspace list has no metrics and language selections persist all checked 
   await app.settle(app.next('/api/tenants'),{tenants:[],connections:connections.credentials,credentials:['main']});
   await home;
   assert.doesNotMatch(app.root.innerHTML,/class="metric"/);
+  assert.doesNotMatch(app.root.innerHTML,/data-form="create"/);
+  const create = app.application.newTenantPage();
+  await app.settle(app.next('/api/tenants'),{tenants:[],connections:connections.credentials,credentials:['main']});
+  await create;
   for (const code of ['bn','hi','zh']) assert.match(app.root.innerHTML,new RegExp(`name="languages" value="${code}" checked`));
   const form = app.form('settings',{languages:['ru','en','bn','hi','zh']},'A');
   const save = app.submit(form);
@@ -233,7 +237,7 @@ test('slower previous tenant response cannot replace a newer tenant form', async
 test('opening tenant from dashboard loads actual connection options before rendering settings', async () => {
   const app = browserFixture();
   await app.signIn(operatorProfile);
-  const open = app.application.openTenant('A', 'settings');
+  const open = app.application.openTenant('A', 'translation');
   await app.settle(app.next('/api/tenants/A'), tenantDetails('A'));
   assert.doesNotMatch(app.root.innerHTML, /data-form="settings"/);
   await app.settle(app.next('/api/provider-credentials'), {
@@ -250,7 +254,7 @@ const wallet = {
 };
 
 async function openOperatorTenant(app, id = 'A') {
-  const open = app.application.openTenant(id, 'team');
+  const open = app.application.openTenant(id, 'billing');
   await app.settle(app.next(`/api/tenants/${id}`), tenantDetails(id, {billing: wallet}));
   await app.settle(app.next('/api/provider-credentials'), {credentials: []});
   await open;
@@ -542,7 +546,7 @@ test('a journal read error leaves ordinary navigation available and finance clos
   const storage = {...browserStorage(), getItem() { throw new Error('Blocked storage'); }};
   const app = browserFixture(storage);
   await app.signIn(operatorProfile);
-  assert.match(app.root.innerHTML, /<h1>Dashboard<\/h1>/);
+  assert.match(app.root.innerHTML, /<h1>Обзор платформы<\/h1>/);
   await openOperatorTenant(app);
   assert.match(app.root.innerHTML, /Журнал финансовых операций недоступен/);
   await app.submit(app.form('balance', {operation: 'credit', amount: '10', reason: 'Paid invoice'}, 'A'));
@@ -677,4 +681,120 @@ test('a failed server logout still rejects a previously pending successful respo
   await app.settle(profile, memberProfile);
   await refresh;
   assert.match(app.root.innerHTML, /Добро пожаловать/);
+});
+
+test('pricing lives outside the overview and remains restricted to platform administrators', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="price"/);
+  const open = app.application.pricingPage();
+  await app.settle(app.next('/api/billing-settings'), {unit_price_cents: 500});
+  await open;
+  assert.equal(app.location.hash, '#pricing');
+  const save = app.submit(app.form('price', {price: '6.25'}));
+  const request = app.next('/api/billing-settings');
+  assert.equal(request.options.method, 'PUT');
+  assert.deepEqual(JSON.parse(request.options.body), {unit_price_cents: 625});
+  await app.settle(request, {ok: true});
+  await app.settle(app.next('/api/billing-settings'), {unit_price_cents: 625});
+  await save;
+  assert.match(app.root.innerHTML, /value="6.25"/);
+
+  const owner = browserFixture(browserStorage(), '#pricing');
+  await owner.signIn(memberProfile);
+  assert.equal(owner.location.hash, '#home');
+  assert.equal(owner.pending.some(r => r.path === '/api/billing-settings'), false);
+  assert.doesNotMatch(owner.root.innerHTML, /data-action="pricing"/);
+});
+
+test('tenant screens keep finance and limits out of the team and translation tasks', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  await openOperatorTenant(app);
+  await app.click({action: 'section:team'});
+  assert.match(app.root.innerHTML, /data-form="invite"/);
+  assert.doesNotMatch(app.root.innerHTML, /data-form="balance"|class="metric"/);
+  await app.click({action: 'section:translation'});
+  assert.match(app.root.innerHTML, /data-languages/);
+  assert.doesNotMatch(app.root.innerHTML, /name="(?:name|seats|rpm|amount)"/);
+  await app.click({action: 'section:settings'});
+  assert.match(app.root.innerHTML, /name="seats"/);
+  assert.doesNotMatch(app.root.innerHTML, /data-languages|name="model"/);
+});
+
+test('leaving a dirty form can be cancelled or explicitly discarded, including browser history', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  const dirty = {dataset: {dirty: 'true'}};
+  app.root.querySelector = selector => selector === 'form[data-dirty="true"]' && dirty.dataset.dirty ? dirty : null;
+  app.root.querySelectorAll = () => [dirty];
+  let close;
+  app.message.addEventListener = (_event, handler) => { close = handler; };
+  app.message.showModal = () => { app.message.open = true; };
+  const help = app.application.helpPage();
+  assert.equal(app.pending.some(r => r.path === '/api/downloads'), false);
+  app.message.open = false;
+  app.message.returnValue = 'cancel';
+  close();
+  await help;
+  assert.equal(app.location.hash, '#dashboard');
+  assert.equal(dirty.dataset.dirty, 'true');
+
+  app.location.hash = '#help';
+  const back = app.application.start();
+  app.message.open = false;
+  app.message.returnValue = 'cancel';
+  close();
+  await back;
+  assert.equal(app.location.hash, '#dashboard');
+
+  const leave = app.application.helpPage();
+  app.message.open = false;
+  app.message.returnValue = 'discard';
+  close();
+  await new Promise(resolve => setImmediate(resolve));
+  await app.settle(app.next('/api/downloads'), {files: []});
+  await leave;
+  assert.equal(app.location.hash, '#help');
+  assert.equal(dirty.dataset.dirty, undefined);
+});
+
+test('switching a tenant tab invalidates earlier writes so their refresh cannot replace the new tab', async () => {
+  const app = browserFixture();
+  await app.signIn(operatorProfile);
+  await openOperatorTenant(app);
+  const save = app.submit(app.form('settings', {name: 'Renamed'}, 'A'));
+  const write = app.next('/api/tenants/A');
+  await app.click({action: 'section:usage'});
+  await app.settle(write, {ok: true});
+  await save;
+  assert.equal(app.location.hash, '#tenants/A/usage');
+  assert.match(app.root.innerHTML, /Первый перевод ещё впереди/);
+  assert.equal(app.pending.filter(r => r.path === '/api/tenants/A').length, 2);
+});
+
+test('organization owner and administrator keep their distinct UI permissions after regrouping', async () => {
+  for (const role of ['owner', 'admin']) {
+    const app = browserFixture();
+    await app.signIn({...memberProfile, tenants: [{id: 'A', name: 'Team', role}]});
+    const details = tenantDetails('A');
+    details.tenant.role = role;
+    details.billing = role === 'owner' ? wallet : null;
+    const open = app.application.openTenant('A', 'team');
+    await app.settle(app.next('/api/tenants/A'), details);
+    await open;
+    if (role === 'owner') assert.match(app.root.innerHTML, /data-action="section:billing"/);
+    else {
+      assert.doesNotMatch(app.root.innerHTML, /data-action="section:billing"/);
+      assert.doesNotMatch(app.root.innerHTML, /<option value="(?:owner|admin)"/);
+    }
+    await app.click({action: 'section:translation'});
+    assert.match(app.root.innerHTML, /data-languages/);
+    assert.doesNotMatch(app.root.innerHTML, /name="(?:credential|model)"/);
+    await app.click({action: 'section:settings'});
+    assert.match(app.root.innerHTML, /name="name"/);
+    assert.doesNotMatch(app.root.innerHTML, /name="(?:seats|rpm|status|access_until)"/);
+    await app.click({action: 'section:billing'});
+    assert.doesNotMatch(app.root.innerHTML, /data-form="balance"/);
+  }
 });

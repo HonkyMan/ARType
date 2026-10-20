@@ -1,4 +1,5 @@
 import {button, esc, fmt, money, tag} from '../format.js';
+import {searchBox, noMatches, saveActions} from './components.js';
 
 export function createPlatformViews({state, shell}) {
 
@@ -43,9 +44,9 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       </div>
       <section class="panel">
       <div class="panel-head">
-      <h2>Организации и активность</h2>${button('Обновить','dashboard','quiet small')}</div>
+      <h2>Организации и активность</h2>${button('Обновить','dashboard','quiet small')}</div>${searchBox("Найти организацию")}
       <div class="table-wrap">
-      <table>
+      <table data-responsive role="table">
       <thead>
       <tr>
       <th>ОРГАНИЗАЦИЯ</th>
@@ -53,26 +54,29 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       <th>АКТИВНОСТЬ ЗА МЕСЯЦ</th>
       <th>НАЧИСЛЕНО</th>
       <th>БАЛАНС</th>
-      <th>
-      </th>
+      <th>ДЕЙСТВИЯ</th>
       </tr>
       </thead>
-      <tbody>${data.tenants.map(t=>`<tr>
-      <td><strong>${esc(t.name)}</strong><br>${tag(t.status)}</td>
-      <td>${t.billed_seats} оплачено<br><small>${t.connected_seats} включено</small>
+      <tbody>${data.tenants.map(t=>`<tr data-filter-item data-search="${esc(t.name)}">
+      <td data-label="Организация"><strong>${esc(t.name)}</strong><br>${tag(t.status)}</td>
+      <td data-label="Места">${t.billed_seats} оплачено<br><small>${t.connected_seats} включено</small>
       </td>
-      <td>${fmt(t.requests)} переводов · ${fmt(t.active_users)} человек<br><small>${t.last_activity?'Последний: '+esc(new Date(t.last_activity).toLocaleString('ru-RU')):'Переводов пока нет'}</small>
+      <td data-label="Активность за месяц">${fmt(t.requests)} переводов · ${fmt(t.active_users)} человек<br><small>${t.last_activity?'Последний: '+esc(new Date(t.last_activity).toLocaleString('ru-RU')):'Переводов пока нет'}</small>
       </td>
-      <td>${money(t.invoice_amount_cents)}</td>
-      <td>${money(t.balance_cents)}</td>
-      <td>
-      <button class="quiet small" data-tenant="${t.id}">Открыть</button>
+      <td data-label="Начислено">${money(t.invoice_amount_cents)}</td>
+      <td data-label="Баланс">${money(t.balance_cents)}</td>
+      <td data-label="Действия">
+      <button class="quiet small" data-tenant="${t.id}" aria-label="Открыть ${esc(t.name)}">Открыть</button>
       </td>
       </tr>`).join('')||'<tr><td colspan="6">Организаций пока нет.</td></tr>'}</tbody>
       </table>
       </div>
-      </section>
-      <section class="panel">
+      ${noMatches}</section>
+`,'Обзор платформы','Статистика организаций и начисления за календарный месяц UTC.',button('+ Создать организацию','new-tenant'));
+  }
+
+  function pricing(data) {
+    shell(`      <section class="panel">
       <div class="panel-head">
       <h2>Стоимость места</h2>
       </div>
@@ -80,28 +84,29 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       <div class="inline-form">
       <label>USD за человека в календарный месяц<input name="price" inputmode="decimal" value="${(data.unit_price_cents/100).toFixed(2)}" required>
       </label>
-      <button>Сохранить ставку</button>
+
       </div>
+      ${saveActions("Сохранить тариф")}
       <p class="legal">Только для администраторов платформы. Ставка применяется к новым списаниям и продлениям. Уже оплаченные места сохраняют стоимость. Месяц считается по UTC; неполный месяц оплачивается полностью. Отключение не возвращает плату.</p>
       </form>
-      </section>`,'Dashboard','Статистика организаций и начисления за календарный месяц UTC.',button('+ Подключить организацию','new-tenant'));
+      </section>`, 'Тариф платформы', 'Единая стоимость места для всех организаций.');
   }
 
   function provider(data) {
     const rows = data.credentials.map(c=>`<tr>
-      <td><strong>${esc(c.alias)}</strong><br><small>${c.source==='admin'?'Настроено в кабинете':'Настроено на сервере'}</small></td>
-      <td class="connection-address">${esc(c.base_url)}</td>
-      <td class="connection-model">${esc(c.default_model||'Не задана')}</td>
-      <td><span class="tag active">Сохранён</span></td>
-      <td><button class="quiet small" data-edit-provider="${esc(c.alias)}" aria-label="Редактировать ${esc(c.alias)}">Редактировать ↗</button></td>
+      <td data-label="Название"><strong>${esc(c.alias)}</strong><br><small>${c.source==='admin'?'Настроено в кабинете':'Настроено на сервере'}</small></td>
+      <td data-label="Адрес API" class="connection-address">${esc(c.base_url)}</td>
+      <td data-label="Модель по умолчанию" class="connection-model">${esc(c.default_model||'Не задана')}</td>
+      <td data-label="API-ключ"><span class="tag active">Сохранён</span></td>
+      <td data-label="Действия"><button class="quiet small" data-edit-provider="${esc(c.alias)}" aria-label="Редактировать ${esc(c.alias)}">Редактировать ↗</button></td>
       </tr>`).join('');
     shell(`<section class="panel">
       <div class="panel-head"><h2>Подключения</h2><span class="muted">${data.credentials.length}</span></div>
-      ${rows?`<div class="table-wrap"><table class="connections-table">
+      ${rows?`<div class="table-wrap"><table class="connections-table" data-responsive role="table">
       <thead><tr><th>НАЗВАНИЕ</th><th>АДРЕС API</th><th>МОДЕЛЬ ПО УМОЛЧАНИЮ</th><th>API-КЛЮЧ</th><th>ДЕЙСТВИЯ</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`:`<div class="empty"><h2>Подключите первый AI-провайдер</h2><p>Укажите адрес API, модель и ключ. После этого подключение можно назначить организации.</p>${button('Создать подключение','provider-new')}</div>`}
       </section><p class="legal">Каждая организация использует выбранное подключение и свою модель. API-ключи доступны только серверу.</p>`,
-      'AI-провайдеры','Подключения для перевода в ваших организациях.',button('+ Создать подключение','provider-new'));
+      'AI-подключения','Подключения для перевода в ваших организациях.',button('+ Создать подключение','provider-new'));
   }
 
   function providerEditor(data, alias = null) {
@@ -127,7 +132,7 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       <h2>Доступ к платформе</h2>
       </div>
       <div class="table-wrap">
-      <table>
+      <table data-responsive role="table">
       <thead>
       <tr>
       <th>GOOGLE EMAIL</th>
@@ -136,9 +141,9 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       </tr>
       </thead>
       <tbody>${data.administrators.map(a=>`<tr>
-      <td>${esc(a.email)}</td>
-      <td>${a.protected?'Основной администратор':'Администратор платформы'}</td>
-      <td>${a.protected?'Защищён настройками сервера':a.email===me.user.email?'Ваш аккаунт':`<button class="quiet small danger" data-remove-admin="${esc(a.email)}">Отозвать права</button>`}</td>
+      <td data-label="Google email">${esc(a.email)}</td>
+      <td data-label="Доступ">${a.protected?'Основной администратор':'Администратор платформы'}</td>
+      <td data-label="Действия">${a.protected?'Защищён настройками сервера':a.email===me.user.email?'Ваш аккаунт':`<button class="quiet small danger" data-remove-admin="${esc(a.email)}">Отозвать права</button>`}</td>
       </tr>`).join('')}</tbody>
       </table>
       </div>
@@ -158,5 +163,5 @@ const existing=!!c.alias;return `<section class="panel connection-editor">
       </section>`,'Администраторы платформы','Доступ выдаётся и отзывается только администраторами платформы.');
   }
 
-  return {dashboard, provider, providerEditor, admins};
+  return {dashboard, pricing, provider, providerEditor, admins};
 }
