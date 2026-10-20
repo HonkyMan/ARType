@@ -66,6 +66,12 @@ struct ManagedOrganization: Decodable, Identifiable {
     let name: String
     let status: String
     let languages: [String]
+    let can_translate: Bool?
+    let access_message: String?
+    var blockedMessage: String? {
+        guard can_translate == false else { return nil }
+        return access_message ?? "Доступ к программе отключён. Обратитесь к владельцу организации."
+    }
 }
 
 @MainActor
@@ -76,11 +82,14 @@ final class ManagedAccount: ObservableObject {
     @Published var message=""
     @Published var code=""
     @Published var busy=false
+    @Published var accessNotice=""
+    @Published var showAccessNotice=false
     @Published var selected: String=UserDefaults.standard.string(forKey:"artype.organization") ?? "" {
         didSet {
             TriggerController.shared.cancelTranslations()
             UserDefaults.standard.set(selected,forKey:"artype.organization")
             alignLanguages()
+            updateAccessNotice()
         }
     }
     private var loginTask: Task<Void,Never>?
@@ -91,6 +100,10 @@ final class ManagedAccount: ObservableObject {
         organizations.first(where:{$0.id==selected})?.languages.compactMap(Language.init(rawValue:)) ?? [.russian,.english]
     }
     private init() {}
+    private func updateAccessNotice() {
+        let notice=organizations.first(where:{$0.id==selected})?.blockedMessage ?? ""
+        if notice != accessNotice {accessNotice=notice;showAccessNotice = !notice.isEmpty}
+    }
     private func alignLanguages() {
         guard !allowedLanguages.isEmpty else { return }
         if !allowedLanguages.contains(LanguageConfig.sourceLanguage) {LanguageConfig.sourceLanguage=allowedLanguages[0]}
@@ -108,6 +121,7 @@ final class ManagedAccount: ObservableObject {
             UserDefaults.standard.set(true,forKey:AppSettings.Keys.hasCompletedFirstLaunch)
             if !organizations.contains(where:{$0.id==selected}) {selected=organizations.first?.id ?? ""}
             alignLanguages()
+            updateAccessNotice()
         }catch { if generation==current {message=error.localizedDescription} }
     }
     func login() {
@@ -148,7 +162,7 @@ final class ManagedAccount: ObservableObject {
         cancelLogin();let old=token
         // Clearing local credentials is mandatory even when the server cannot be reached.
         guard Credentials.saveCloudAPIKey("") else {message="Не удалось удалить сессию из Связки ключей.";return}
-        generation=UUID();email="";organizations=[];selected="";message=""
+        generation=UUID();email="";organizations=[];selected="";message="";accessNotice="";showAccessNotice=false
         if !old.isEmpty {
             do {_=try await ManagedAPI.json("api/logout",body:[:],token:old)}
             catch {message="Вы вышли на этом устройстве. Сервер не подтвердил отзыв сессии: \(error.localizedDescription)"}

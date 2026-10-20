@@ -2,6 +2,13 @@ import XCTest
 @testable import TypeTide
 
 final class ManagedProtocolTests: XCTestCase {
+    func testUnpaidOrganizationCarriesStartupNoticeAndLegacyProfileStillDecodes() throws {
+        let unpaid=Data(#"{"id":"tenant","name":"Team","status":"active","languages":["ru","en"],"can_translate":false,"access_message":"Balance is unpaid"}"#.utf8)
+        let org=try JSONDecoder().decode(ManagedOrganization.self,from:unpaid)
+        XCTAssertEqual(org.blockedMessage,"Balance is unpaid")
+        let legacy=Data(#"{"id":"tenant","name":"Team","status":"active","languages":["ru","en"]}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(ManagedOrganization.self,from:legacy).blockedMessage)
+    }
     func testStructuredRequestContainsIdentityAndNoClientPromptOrProviderModel() throws {
         let request = TranslationRequest(text: "Привет", source: .russian, target: .english, style: .formal)
         let data = try ManagedProtocol.body(request, tenant: "6e2ca0b8-284c-4fe1-8a57-f4876fa0b36c")

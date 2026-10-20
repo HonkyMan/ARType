@@ -64,6 +64,10 @@ struct ManagedAccountView: View {
                 Text("ARType · Основано на TypeTide, MIT License").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).scrollContentBackground(.hidden).background(Color(nsColor:.windowBackgroundColor))
+            .alert("ARType · доступ к программе",isPresented:$account.showAccessNotice) {
+                Button("Открыть кабинет") {account.openCabinet()}
+                Button("Закрыть",role:.cancel) {}
+            } message: {Text(account.accessNotice)}
             .task {
                 await account.refresh()
                 while !Task.isCancelled {

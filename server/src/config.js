@@ -13,6 +13,6 @@ export function loadConfig(env=process.env) {
   return {origin:origin.origin,secure:origin.protocol==='https:',databaseURL:env.DATABASE_URL,
     adminEmails:(env.ADMIN_EMAILS||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),
     googleClientId:env.GOOGLE_CLIENT_ID||'',googleClientSecret:env.GOOGLE_CLIENT_SECRET||'',
-    credentialEncryptionKey:env.CREDENTIAL_ENCRYPTION_KEY||'',defaultModel:env.DEFAULT_MODEL||'',
+    credentialEncryptionKey:env.CREDENTIAL_ENCRYPTION_KEY||'',defaultModel:env.DEFAULT_MODEL||'',downloadDirectory:env.DOWNLOADS_DIRECTORY||'',
     providerBaseURL:providerBaseURL.replace(/\/$/,''),providerKeys,port:Number(env.PORT||8080),trustProxy:env.TRUST_PROXY==='1'};
 }

@@ -73,7 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 #endif
 
         // 若配置的 Ollama 模型未安装，自动挑一个已装模型（避免开箱即败）
-        Task { @MainActor in await ManagedAccount.shared.refresh() }
+        Task { @MainActor in
+            await ManagedAccount.shared.refresh()
+            if !ManagedAccount.shared.accessNotice.isEmpty {SettingsOpener.open()}
+        }
 
         // 首次启动：打开设置窗口，让用户立刻看到界面并完成配置
         if !UserDefaults.standard.bool(forKey: AppSettings.Keys.hasCompletedFirstLaunch) {

@@ -4,6 +4,17 @@
 #include <string>
 
 namespace managed {
+inline std::string AccessNotice(const json::Value& profile,const std::string& selected) {
+    const auto* tenants=profile["tenants"].array();
+    if(!tenants||tenants->empty())return {};
+    const json::Value* chosen=&tenants->front();
+    for(const auto& tenant:*tenants)if(tenant["id"].asString()==selected){chosen=&tenant;break;}
+    if((*chosen)["can_translate"].type()==json::Value::Type::Bool&&!(*chosen)["can_translate"].asBool()){
+        const auto text=(*chosen)["access_message"].asString();
+        return text.empty()?"Доступ к программе отключён. Обратитесь к владельцу организации.":text;
+    }
+    return {};
+}
 inline bool OriginAllowed(std::string value) {
     if (!value.empty() && value.back()=='/') value.pop_back();
     static const std::regex https(R"(^https://([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(:[0-9]{1,5})?$)");

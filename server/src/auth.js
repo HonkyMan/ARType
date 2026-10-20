@@ -32,13 +32,14 @@ export function authMiddleware(pool,config) {
     const bearer=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,200})$/)?.[1];
     const token=bearer || cookies(req).artype_session;
     if(!token)fail(401,'sign_in_required','Войдите в ARType.');
-    const session=(await pool.query(`SELECT s.*,u.id,u.email,u.name FROM sessions s JOIN users u ON u.id=s.user_id
+    const session=(await pool.query(`SELECT s.*,u.id,u.email,u.name,
+      EXISTS(SELECT 1 FROM platform_admins a WHERE a.email=u.email) AS platform_admin FROM sessions s JOIN users u ON u.id=s.user_id
       WHERE token_hash=$1 AND expires_at>now()`,[hash(token)])).rows[0];
     if(!session || (bearer && session.kind!=='desktop'))fail(401,'session_expired','Сессия истекла. Войдите снова.');
     if(!['GET','HEAD','OPTIONS'].includes(req.method) && !bearer) {
       if(req.headers.origin!==config.origin || !same(req.headers['x-csrf-token'],session.csrf))fail(403,'csrf','Обновите страницу и повторите действие.');
     }
-    req.user={id:session.user_id,email:session.email,name:session.name}; req.session=session; next();
+    req.user={id:session.user_id,email:session.email,name:session.name,platform_admin:session.platform_admin}; req.session=session; next();
   };
 }
 export function installAuth(app,{pool,config,google,validate,z}) {

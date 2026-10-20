@@ -22,6 +22,7 @@ constexpr UINT WM_APP_OPEN_SETTINGS = WM_APP + 6;
 constexpr UINT WM_APP_MODELS = WM_APP + 7;          // lParam=std::vector<std::wstring>*（接收方释放）
 constexpr UINT WM_APP_READ_CAPTURED = WM_APP + 8;   // lParam=capture::Capture*（可空；接收方释放）
 constexpr UINT WM_APP_REWRITE_CAPTURED = WM_APP + 9;// 同上
+constexpr UINT WM_APP_ACCOUNT_STATUS = WM_APP + 10;
 
 constexpr wchar_t kAppWindowClass[] = L"ARTypeApp";
 

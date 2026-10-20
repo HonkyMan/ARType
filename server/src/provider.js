@@ -8,8 +8,8 @@ export function providerPayload(body,tenant) {
       {role:'user',content:body.text}]};
 }
 export function makeTranslator(config) {
-  return async(payload,credential,key=config.providerKeys[credential])=>{
-    const r=await fetch(config.providerBaseURL+'/chat/completions',{method:'POST',redirect:'error',
+  return async(payload,credential,key=config.providerKeys[credential],baseURL=config.providerBaseURL)=>{
+    const r=await fetch(baseURL+'/chat/completions',{method:'POST',redirect:'error',
       headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},
       body:JSON.stringify(payload),signal:AbortSignal.timeout(45000)});
     if(!r.ok){await r.body?.cancel();throw new HttpError(502,'provider_unavailable','Провайдер перевода недоступен. Повторите позже.');}

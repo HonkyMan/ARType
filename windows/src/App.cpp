@@ -11,6 +11,9 @@
 #include "Translator.h"
 #include "UpdateChecker.h"
 #include "Util.h"
+#include "ManagedAccount.h"
+#include "ManagedProtocol.h"
+#include "Credentials.h"
 #include <shellapi.h>
 #include <psapi.h>
 #include <memory>
@@ -70,7 +73,7 @@ bool App::init(HINSTANCE inst) {
     Settings& s = Settings::shared();
     if (!s.hasCompletedFirstLaunch || !shortcutIssue_.empty()) {
         openSettings();
-    }
+    } else if(const auto token=credentials::LoadCloudApiKey();!token.empty())account::FetchProfile(hwnd_,WM_APP_ACCOUNT_STATUS,token);
 
 
 
@@ -459,6 +462,13 @@ void App::showErrorPopup(const std::wstring& original, Language target, RECT anc
 
 LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_APP_ACCOUNT_STATUS: {
+        std::unique_ptr<account::Update> update(reinterpret_cast<account::Update*>(lp));
+        if(!update||!account::Current(update->generation)||!update->profile.isObject())return 0;
+        const auto notice=managed::AccessNotice(update->profile,Settings::shared().tenantId);
+        if(!notice.empty())MessageBoxW(hwnd_,util::Widen(notice).c_str(),L"ARType · доступ к программе",MB_OK|MB_ICONINFORMATION);
+        return 0;
+    }
     case WM_HOTKEY:
         if (wp == kReadHotkeyId) performShortcutAction(Settings::shared().readShortcutAction);
         else if (wp == kRewriteHotkeyId) performShortcutAction(Settings::shared().rewriteShortcutAction);

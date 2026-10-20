@@ -28,6 +28,10 @@ test('credential resolved from encrypted storage overrides the legacy environmen
   assert.equal(received.authorization,'Bearer current-database-key');
   assert.ok(!JSON.stringify(received.body).includes('current-database-key'));
 });
+test('selected connection URL overrides deployment default in the actual HTTP adapter',async()=>{
+  mode='success';await makeTranslator({providerBaseURL:'http://127.0.0.1:1',providerKeys:{}})({model:'tenant-model',messages:[]},'custom','custom-key',base);
+  assert.equal(received.path,'/v1/chat/completions');assert.equal(received.authorization,'Bearer custom-key');assert.equal(received.body.model,'tenant-model');
+});
 test('actual provider failures, redirects, broken bodies and truncated completions never return partial text',async()=>{
   for(const state of ['failure','partial','redirect','truncated','error','tools','no_finish','choice_error']){mode=state;await assert.rejects(run(),state);}
 });

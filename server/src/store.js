@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {decryptCredential} from './credentials.js';
+import {reconcileTenantBilling,productAccess} from './billing.js';
 
 export class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status=status; this.code=code; }
@@ -60,10 +61,38 @@ export async function migrate(pool) {
         alias text PRIMARY KEY, ciphertext text NOT NULL,
         updated_by uuid NOT NULL REFERENCES users(id), updated_at timestamptz NOT NULL DEFAULT now());
       INSERT INTO schema_versions(version) VALUES(2) ON CONFLICT DO NOTHING;
+      CREATE TABLE IF NOT EXISTS platform_admins(
+        email text PRIMARY KEY, added_by uuid NOT NULL REFERENCES users(id),
+        created_at timestamptz NOT NULL DEFAULT now());
+      ALTER TABLE audit ADD COLUMN IF NOT EXISTS details jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE provider_credentials ADD COLUMN IF NOT EXISTS base_url text;
+      ALTER TABLE provider_credentials ADD COLUMN IF NOT EXISTS default_model text;
+      INSERT INTO schema_versions(version) VALUES(3) ON CONFLICT DO NOTHING;
+      ALTER TABLE memberships ADD COLUMN IF NOT EXISTS product_enabled boolean NOT NULL DEFAULT true;
+      UPDATE memberships SET product_enabled=false WHERE role='owner' AND NOT EXISTS(SELECT 1 FROM schema_versions WHERE version=4);
+      CREATE TABLE IF NOT EXISTS billing_settings(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),unit_price_cents int NOT NULL CHECK(unit_price_cents BETWEEN 0 AND 100000000),currency text NOT NULL DEFAULT 'USD' CHECK(currency='USD'));
+      INSERT INTO billing_settings(singleton,unit_price_cents) VALUES(true,500) ON CONFLICT DO NOTHING;
+      CREATE TABLE IF NOT EXISTS tenant_wallets(tenant_id uuid PRIMARY KEY REFERENCES tenants(id),balance_cents bigint NOT NULL DEFAULT 0 CHECK(balance_cents BETWEEN 0 AND 9000000000000));
+      CREATE TABLE IF NOT EXISTS balance_ledger(
+        id uuid PRIMARY KEY, sequence bigserial UNIQUE NOT NULL, tenant_id uuid NOT NULL REFERENCES tenants(id),
+        delta_cents bigint NOT NULL, balance_before bigint NOT NULL, balance_after bigint NOT NULL CHECK(balance_after BETWEEN 0 AND 9000000000000),
+        kind text NOT NULL CHECK(kind IN ('credit','adjustment','seat_charge')), reason text NOT NULL,
+        idempotency_key text NOT NULL, request jsonb NOT NULL, actor_id uuid REFERENCES users(id),
+        source text NOT NULL CHECK(source IN ('manual','system','payment')),created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(tenant_id,idempotency_key),CHECK(balance_after=balance_before+delta_cents));
+      CREATE INDEX IF NOT EXISTS ledger_tenant_sequence ON balance_ledger(tenant_id,sequence DESC);
+      CREATE TABLE IF NOT EXISTS seat_charges(
+        tenant_id uuid NOT NULL REFERENCES tenants(id),email text NOT NULL,period date NOT NULL,
+        unit_price_cents int NOT NULL CHECK(unit_price_cents>=0),ledger_id uuid NOT NULL UNIQUE REFERENCES balance_ledger(id),
+        PRIMARY KEY(tenant_id,email,period));
+      CREATE OR REPLACE FUNCTION immutable_ledger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'balance ledger is immutable'; END; $$;
+      DROP TRIGGER IF EXISTS immutable_balance_ledger ON balance_ledger;
+      CREATE TRIGGER immutable_balance_ledger BEFORE UPDATE OR DELETE ON balance_ledger FOR EACH ROW EXECUTE FUNCTION immutable_ledger();
+      INSERT INTO schema_versions(version) VALUES(4) ON CONFLICT DO NOTHING;
     `);
   } finally {await c.query('SELECT pg_advisory_unlock(63821017)');c.release()}
 }
-export function operator(user,config) {return config.adminEmails.includes(user.email)}
+export function operator(user,config) {return config.adminEmails.includes(user.email) || user.platform_admin===true}
 export async function activateMemberships(c,email) {
   const locked=await c.query("SELECT t.id FROM tenants t JOIN memberships m ON t.id=m.tenant_id WHERE m.email=$1 AND m.status='invited' ORDER BY t.id FOR UPDATE OF t",[email]);
   if(locked.rowCount)await c.query("UPDATE memberships SET status='active' WHERE email=$1 AND tenant_id=ANY($2::uuid[]) AND status='invited' AND expires_at>clock_timestamp()",[email,locked.rows.map(t=>t.id)]);
@@ -75,22 +104,26 @@ export async function access(c,tenantId,user,config,{manage=false,lock=false}={}
   if(!operator(user,config) && (!m || (manage && !['owner','admin'].includes(m.role)))) fail(403,'no_access','Недостаточно прав.');
   return {...t,role:operator(user,config)?'operator':m.role};
 }
-export async function audit(c,user,action,tenantId) {
-  await c.query('INSERT INTO audit(id,actor_id,action,tenant_id) VALUES($1,$2,$3,$4)',[uid(),user.id,action,tenantId]);
+export async function audit(c,user,action,tenantId,details={}) {
+  await c.query('INSERT INTO audit(id,actor_id,action,tenant_id,details) VALUES($1,$2,$3,$4,$5)',[uid(),user.id,action,tenantId,details]);
 }
 export async function credentialList(c,config){
-  const rows=(await c.query('SELECT alias,updated_at FROM provider_credentials ORDER BY alias')).rows;
+  const rows=(await c.query('SELECT alias,updated_at,base_url,default_model FROM provider_credentials ORDER BY alias')).rows;
   const saved=new Set(rows.map(r=>r.alias));
-  return [...rows.map(r=>({...r,source:'admin'})),...Object.keys(config.providerKeys).filter(k=>config.providerKeys[k]&&!saved.has(k)).map(alias=>({alias,source:'environment',updated_at:null}))];
+  return [...rows.map(r=>({...r,base_url:r.base_url||config.providerBaseURL,default_model:r.default_model??config.defaultModel??'',source:'admin'})),...Object.keys(config.providerKeys).filter(k=>config.providerKeys[k]&&!saved.has(k)).map(alias=>({alias,source:'environment',updated_at:null,base_url:config.providerBaseURL,default_model:config.defaultModel||''}))];
 }
 export async function reserve(pool,user,body,config) {
   return transaction(pool,async c=>{
     const t=await access(c,body.tenant_id,user,config,{lock:true});
     if(t.status!=='active' || (t.access_until && new Date(t.access_until)<=new Date())) fail(403,'tenant_inactive','Доступ организации приостановлен или истёк. Обратитесь к администратору.');
+    await reconcileTenantBilling(c,t.id);
+    const entitlement=await productAccess(c,t.id,user.email);
+    if(entitlement.app_status==='awaiting_payment')fail(402,'billing_unpaid',entitlement.access_message);
+    if(!entitlement.can_translate)fail(403,'product_disabled',entitlement.access_message);
     const n=Array.from(body.text).length;
     if(n>t.max_text) fail(422,'text_too_long',`Максимальная длина текста: ${t.max_text} символов.`);
     if(!t.languages.includes(body.target) || (body.source && !t.languages.includes(body.source))) fail(422,'language_not_allowed','Этот язык не разрешён в организации.');
-    const saved=(await c.query('SELECT ciphertext FROM provider_credentials WHERE alias=$1',[t.credential])).rows[0];
+    const saved=(await c.query('SELECT ciphertext,base_url FROM provider_credentials WHERE alias=$1',[t.credential])).rows[0];
     let providerKey=config.providerKeys[t.credential];
     if(saved){
       try{providerKey=decryptCredential(saved.ciphertext,config.credentialEncryptionKey,t.credential)}
@@ -108,6 +141,6 @@ export async function reserve(pool,user,body,config) {
     if(sums.rpm>=t.rpm || sums.pending>=t.concurrency || sums.personal>=2) fail(429,'busy','Слишком много запросов. Повторите через минуту.');
     const id=uid();
     await c.query("INSERT INTO usage(id,tenant_id,user_id,request_id,characters,status) VALUES($1,$2,$3,$4,$5,'pending')",[id,t.id,user.id,body.request_id,n]);
-    return {id,tenant:t,providerKey};
+    return {id,tenant:t,providerKey,providerBaseURL:saved?.base_url||config.providerBaseURL};
   });
 }

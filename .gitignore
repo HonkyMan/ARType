@@ -58,3 +58,6 @@ playwright-report/
 .playwright-cli/
 output/
 *.log
+
+# Published desktop downloads (assembled locally)
+releases/

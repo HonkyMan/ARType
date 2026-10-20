@@ -2,14 +2,18 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import { createApp } from '../src/app.js';
-import { migrate } from '../src/store.js';
+import { migrate,transaction } from '../src/store.js';
+import {billingPeriod,reconcileTenantBilling,productAccess} from '../src/billing.js';
 
 const pool = new pg.Pool({connectionString: process.env.TEST_DATABASE_URL});
 const origin = 'http://127.0.0.1:43189';
 const config = {origin, adminEmails:['operator@example.com'], googleClientId:'test-client', googleClientSecret:'test-secret',
   providerKeys:{main:'server-only-key'}, providerBaseURL:'https://example.com/v1', credentialEncryptionKey:'ab'.repeat(32),secure:false};
-let server, url, upstreamCalls, upstreamCredentials, upstreamFail, googleClaims;
+let server, url, upstreamCalls, upstreamCredentials, upstreamUrls, upstreamFail, googleClaims;
 const claimsByCode=new Map();
 const hash = s => createHash('sha256').update(s).digest('hex');
 async function actor(email) {
@@ -23,23 +27,178 @@ async function call(path, {actor:a, method='GET', body, headers={}}={}) {
     ...(body?{'Content-Type':'application/json'}:{}), ...headers},body:body?JSON.stringify(body):undefined,redirect:'manual'});
   let data; const text=await r.text(); try{data=JSON.parse(text)}catch{data=text} return {status:r.status,data,headers:r.headers};
 }
-async function tenant(op, owner, overrides={}) {
+async function tenant(op, owner, overrides={}, {paidOwner=true}={}) {
   const r=await call('/api/tenants',{actor:op,method:'POST',body:{name:'Acme',owner_email:owner,model:'test-model',credential:'main',...overrides}});
-  assert.equal(r.status,201,JSON.stringify(r.data)); return r.data;
+  assert.equal(r.status,201,JSON.stringify(r.data));
+  if(paidOwner){
+    assert.equal((await call(`/api/tenants/${r.data.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:100000,reason:'Test prepaid seats',idempotency_key:randomUUID()}})).status,200);
+    assert.equal((await call(`/api/tenants/${r.data.id}/members`,{actor:op,method:'POST',body:{email:owner,role:'member'}})).status,201);
+  }return r.data;
 }
 before(async()=>{
   assert.ok(process.env.TEST_DATABASE_URL, 'Set TEST_DATABASE_URL to an isolated PostgreSQL database');
   assert.match(new URL(process.env.TEST_DATABASE_URL).pathname, /_test$/, 'Test database must end in _test');
   await migrate(pool);
+  config.downloadDirectory=await mkdtemp(join(tmpdir(),'artype-download-test-'));
   server=createApp({pool,config,google:{authorizationURL:({state})=>`https://accounts.google.com/o/oauth2/v2/auth?state=${state}`,
-    exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload,alias,key)=>{
-      upstreamCalls.push(payload);upstreamCredentials.push(key); if(upstreamFail)throw new Error('provider internal secret');
+    exchange:async(code)=>claimsByCode.get(code)||googleClaims}, translate:async(payload,alias,key,baseURL)=>{
+      upstreamCalls.push(payload);upstreamCredentials.push(key);upstreamUrls.push(baseURL); if(upstreamFail)throw new Error('provider internal secret');
       await new Promise(r=>setTimeout(r,30)); return {text:'Hello world',input_tokens:10,output_tokens:3};
     }}).listen(0,'127.0.0.1');
   await new Promise(r=>server.once('listening',r)); url=`http://127.0.0.1:${server.address().port}`;
 });
-after(async()=>{if(server)await new Promise(r=>server.close(r)); await pool.end()});
-beforeEach(async()=>{await pool.query('TRUNCATE users,tenants,memberships,sessions,oauth_states,devices,usage,audit RESTART IDENTITY CASCADE');upstreamCalls=[];upstreamCredentials=[];upstreamFail=false;});
+after(async()=>{if(server)await new Promise(r=>server.close(r)); await pool.end();if(config.downloadDirectory)await rm(config.downloadDirectory,{recursive:true,force:true})});
+beforeEach(async()=>{await pool.query('TRUNCATE users,tenants,memberships,sessions,oauth_states,devices,usage,audit RESTART IDENTITY CASCADE');upstreamCalls=[];upstreamCredentials=[];upstreamUrls=[];upstreamFail=false;});
+
+test('only platform administrators grant global access; revocation applies to existing sessions',async()=>{
+  const op=await actor('operator@example.com'),employee=await actor('employee@example.com'),owner=await actor('owner@example.com');
+  const path='/api/platform-admins/'+encodeURIComponent('employee@example.com');
+  const t=await tenant(op,'owner@example.com');
+  assert.equal((await call('/api/platform-admins',{actor:owner})).status,403);
+  assert.equal((await call(path,{actor:owner,method:'PUT',body:{}})).status,403);
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{}})).status,200);
+  assert.equal((await call('/api/me',{actor:employee})).data.operator,true);
+  assert.equal((await call('/api/tenants',{actor:employee})).status,200);
+  assert.equal((await call('/api/platform-admins/'+encodeURIComponent('operator@example.com'),{actor:employee,method:'DELETE'})).status,409);
+  assert.equal((await call(path,{actor:employee,method:'DELETE'})).status,409);
+  assert.equal((await call(path,{actor:op,method:'DELETE'})).status,200);
+  assert.equal((await call('/api/tenants',{actor:employee})).status,403);
+  assert.equal((await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'localadmin@example.com',role:'admin'}})).status,201);
+  const localAdmin=await actor('localadmin@example.com');
+  assert.equal((await call('/api/me',{actor:localAdmin})).data.operator,false);
+  assert.equal((await call(path,{actor:localAdmin,method:'PUT',body:{}})).status,403);
+});
+
+test('connection metadata routes each tenant and changing destinations requires an explicit key',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const path='/api/provider-credentials/custom';
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'new-provider-key',base_url:'https://provider.example/v1',default_model:'model-one'}})).status,200);
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{default_model:'model-two'}})).status,200);
+  const t=await tenant(op,'owner@example.com',{credential:'custom',model:'chosen-model'});
+  const request=()=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'en'}});
+  assert.equal((await request()).status,200);
+  assert.equal(upstreamUrls.at(-1),'https://provider.example/v1');
+  assert.equal(upstreamCalls.at(-1).model,'chosen-model');
+  assert.equal(upstreamCredentials.at(-1),'new-provider-key');
+  assert.equal((await call(path,{actor:op,method:'PUT',body:{base_url:'https://other.example/v1'}})).status,422);
+  for(const base_url of ['http://unsafe.example/v1','https://user:password@provider.example/v1','https://provider.example/v1?token=secret','https://provider.example/v1#fragment']){
+    assert.equal((await call(path,{actor:op,method:'PUT',body:{key:'key',base_url}})).status,422);
+  }
+  const listing=await call('/api/provider-credentials',{actor:op});
+  assert.equal(listing.data.credentials.find(c=>c.alias==='custom').default_model,'model-two');
+  assert.ok(!JSON.stringify(listing.data).includes('new-provider-key'));
+  assert.equal((await call(`/api/tenants/${t.id}`,{actor:owner,method:'PATCH',body:{credential:'main'}})).status,403);
+});
+
+test('published installer downloads require login and expose only manifest-listed files',async()=>{
+  const member=await actor('member@example.com');
+  const filename='ARType-0.1.18-test.exe',bytes='test-installer-bytes';
+  const entry={filename,platform:'windows-x64',version:'0.1.18',signing:'unsigned-validation',sha256:hash(bytes),size_bytes:Buffer.byteLength(bytes),service_url:origin};
+  await writeFile(join(config.downloadDirectory,filename),bytes);
+  await writeFile(join(config.downloadDirectory,'private.txt'),'private-data');
+  await writeFile(join(config.downloadDirectory,'manifest.json'),JSON.stringify({files:[entry]}));
+  assert.equal((await call('/api/downloads')).status,401);
+  const listing=await call('/api/downloads',{actor:member});assert.equal(listing.status,200);
+  assert.equal(listing.data.files[0].url,'/downloads/'+filename);
+  assert.equal(listing.data.files[0].sha256,hash(bytes));
+  assert.equal((await call('/downloads/'+filename)).status,401);
+  const download=await call('/downloads/'+filename,{actor:member});assert.equal(download.status,200);assert.equal(download.data,bytes);
+  assert.match(download.headers.get('content-disposition'),/attachment/);
+  assert.equal((await call('/downloads/private.txt',{actor:member})).status,404);
+  assert.equal((await call('/downloads/manifest.json',{actor:member})).status,404);
+  await rm(join(config.downloadDirectory,'manifest.json'));
+  assert.deepEqual((await call('/api/downloads',{actor:member})).data.files,[]);
+});
+
+test('only platform administrators set prices and post idempotent balance entries; owners see their own balance',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com'),other=await actor('other@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false}),path=`/api/tenants/${t.id}/balance`;
+  assert.equal((await call('/api/billing-settings',{actor:owner,method:'PUT',body:{unit_price_cents:700}})).status,403);
+  assert.equal((await call('/api/billing-settings',{actor:op,method:'PUT',body:{unit_price_cents:700}})).status,200);
+  assert.equal((await call('/api/billing-settings',{actor:op})).data.unit_price_cents,700);
+  const body={operation:'credit',amount_cents:10000,reason:'Invoice INV-001 paid',idempotency_key:randomUUID()};
+  assert.equal((await call(path,{actor:owner,method:'POST',body})).status,403);
+  const responses=await Promise.all([call(path,{actor:op,method:'POST',body}),call(path,{actor:op,method:'POST',body})]);
+  assert.deepEqual(responses.map(r=>r.status),[200,200]);
+  assert.equal(responses[0].data.entry.id,responses[1].data.entry.id);
+  assert.equal((await call(path,{actor:owner})).data.balance_cents,10000);
+  assert.equal((await call(path,{actor:owner})).data.entries.length,1);
+  assert.equal((await call(path,{actor:other})).status,403);
+  assert.equal((await call(path,{actor:op,method:'POST',body:{...body,amount_cents:20000}})).status,409);
+  assert.equal((await call(path,{actor:op,method:'POST',body:{operation:'set',amount_cents:5000,reason:'Correction after reconciliation',idempotency_key:randomUUID()}})).status,200);
+  const wallet=(await call(path,{actor:owner})).data;assert.equal(wallet.balance_cents,5000);assert.equal(wallet.entries.length,2);
+  assert.equal(wallet.entries[0].delta_cents,-5000);
+  await assert.rejects(pool.query('UPDATE balance_ledger SET reason=$1 WHERE id=$2',['overwrite',wallet.entries[0].id]),/immutable/);
+  for(const amount_cents of [-1,1.5,1e15])assert.equal((await call(path,{actor:op,method:'POST',body:{...body,idempotency_key:randomUUID(),amount_cents}})).status,422);
+  assert.equal((await call('/api/dashboard',{actor:owner})).status,403);
+  const dashboard=await call('/api/dashboard',{actor:op});assert.equal(dashboard.status,200);
+  assert.equal(dashboard.data.tenants[0].balance_cents,5000);
+  assert.equal(dashboard.data.tenants[0].invoice_amount_cents,0,'a management-only owner is not billed');
+  assert.equal(dashboard.data.collection_enabled,true);
+  await call('/api/billing-settings',{actor:op,method:'PUT',body:{unit_price_cents:500}});
+});
+
+test('owners manage for free; self-enrollment is paid, per tenant and once per calendar month',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  const request=()=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:t.id,request_id:randomUUID(),text:'Привет',target:'en'}});
+  assert.equal((await request()).status,403);
+  const add=()=>call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'owner@example.com',role:'member'}});
+  assert.equal((await add()).status,201);
+  assert.equal((await request()).status,402);
+  const credit=await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:1000,reason:'Paid invoice',idempotency_key:randomUUID()}});
+  assert.equal(credit.status,200);
+  assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,500);
+  assert.equal((await request()).status,200);
+  const own=(await call(`/api/tenants/${t.id}`,{actor:owner})).data.members[0];assert.equal(own.role,'owner');assert.equal(own.app_status,'active');
+  assert.equal((await call(`/api/tenants/${t.id}/members/${own.id}`,{actor:owner,method:'PATCH',body:{product_enabled:false}})).status,200);
+  assert.equal((await request()).status,403);
+  assert.equal((await add()).status,201);
+  assert.equal((await request()).status,200);
+  assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,500);
+  const second=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  await call(`/api/tenants/${second.id}/members`,{actor:owner,method:'POST',body:{email:'owner@example.com',role:'member'}});
+  assert.equal((await call(`/api/tenants/${second.id}`,{actor:owner})).data.members[0].app_status,'awaiting_payment');
+  const dashboard=(await call('/api/dashboard',{actor:op})).data;
+  assert.equal(dashboard.invoice_amount_cents,500);assert.equal(dashboard.billed_seats,1);
+});
+
+test('tenant administrator cannot enroll an existing free owner through the invitation endpoint',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com'),admin=await actor('admin@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  await call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:2000,reason:'Paid invoice',idempotency_key:randomUUID()}});
+  await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email:'admin@example.com',role:'admin'}});
+  const before=(await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents;
+  assert.equal((await call(`/api/tenants/${t.id}/members`,{actor:admin,method:'POST',body:{email:'owner@example.com',role:'member'}})).status,403);
+  assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,before);
+});
+
+test('monthly renewal is atomic, keeps historical prices and never renews disabled employees',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('owner@example.com');
+  const t=await tenant(op,'owner@example.com',{}, {paidOwner:false});
+  const credit=amount_cents=>call(`/api/tenants/${t.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents,reason:'Invoice paid',idempotency_key:randomUUID()}});
+  await credit(1200);
+  for(const email of ['a@example.com','b@example.com'])await call(`/api/tenants/${t.id}/members`,{actor:owner,method:'POST',body:{email,role:'member'}});
+  const period=await billingPeriod(pool),next=new Date(period+'T00:00:00Z');next.setUTCMonth(next.getUTCMonth()+1);const future=next.toISOString().slice(0,10);
+  const renew=()=>transaction(pool,c=>reconcileTenantBilling(c,t.id,future));
+  const unpaid=await renew();assert.equal(unpaid.pending_seats,2);assert.equal(unpaid.missing_cents,800);
+  assert.equal((await productAccess(pool,t.id,'a@example.com',future)).app_status,'awaiting_payment');
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1 AND period=$2',[t.id,future])).rows[0].n,0);
+  await credit(800);
+  await Promise.all([renew(),renew()]);
+  assert.equal((await productAccess(pool,t.id,'a@example.com',future)).can_translate,true);
+  assert.equal((await call(`/api/tenants/${t.id}/balance`,{actor:owner})).data.balance_cents,0);
+  await call('/api/billing-settings',{actor:op,method:'PUT',body:{unit_price_cents:700}});
+  await renew();
+  assert.deepEqual((await pool.query('SELECT DISTINCT unit_price_cents FROM seat_charges WHERE tenant_id=$1 AND period=$2',[t.id,future])).rows.map(r=>r.unit_price_cents),[500]);
+  const b=(await call(`/api/tenants/${t.id}`,{actor:owner})).data.members.find(m=>m.email==='b@example.com');
+  await call(`/api/tenants/${t.id}/members/${b.id}`,{actor:owner,method:'PATCH',body:{status:'disabled'}});
+  await credit(700);next.setUTCMonth(next.getUTCMonth()+1);const later=next.toISOString().slice(0,10);
+  await transaction(pool,c=>reconcileTenantBilling(c,t.id,later));
+  assert.equal((await productAccess(pool,t.id,'b@example.com',later)).app_status,'disabled');
+  assert.equal((await pool.query('SELECT count(*)::int n FROM seat_charges WHERE tenant_id=$1 AND period=$2',[t.id,later])).rows[0].n,1);
+  await call('/api/billing-settings',{actor:op,method:'PUT',body:{unit_price_cents:500}});
+});
 
 test('only operator stores encrypted provider keys; rotation applies to the next translation without leaking keys',async()=>{
   const op=await actor('operator@example.com'),owner=await actor('owner@example.com');

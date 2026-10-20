@@ -1,4 +1,5 @@
 #include "ManagedAccount.h"
+#include "ManagedProtocol.h"
 #include "Credentials.h"
 #include "SettingsWindow.h"
 #include "App.h"
@@ -90,6 +91,7 @@ struct State {
     int clientWidth = 0;
     int clientHeight = 0;
     std::vector<std::string> tenants;
+    std::string accessNotice;
 };
 
 State g;
@@ -815,7 +817,7 @@ void onCommand(int id, int code) {
     }
     case kAccountTenant:
         if(code==CBN_SELCHANGE){auto index=(int)SendMessageW(ctrl(kAccountTenant),CB_GETCURSEL,0,0);
-            if(index>=0 && index<(int)g.tenants.size()){App::shared().cancelTranslations();s.tenantId=g.tenants[index];s.save();}}
+            if(index>=0 && index<(int)g.tenants.size()){App::shared().cancelTranslations();s.tenantId=g.tenants[index];s.save();account::FetchProfile(g.hwnd,kMsgAccount,credentials::LoadCloudApiKey());}}
         return;
     case kTab:
         if (code == LBN_SELCHANGE)
@@ -1377,8 +1379,11 @@ void applyAccountProfile(const json::Value& profile) {
     s.hasCompletedFirstLaunch=true;
     s.save();
     std::wstring text=util::Widen(profile["user"]["email"].asString());
-    text+=g.tenants.empty()?L"\nНет организаций. Попросите администратора пригласить этот email.":L"\nВыберите рабочую организацию ниже.";
+    const auto notice=managed::AccessNotice(profile,s.tenantId);
+    text+=g.tenants.empty()?L"\nНет организаций. Попросите администратора пригласить этот email.":notice.empty()?L"\nВыберите рабочую организацию ниже.":L"\n"+util::Widen(notice);
     SetWindowTextW(ctrl(kAccountMessage),text.c_str());
+    if(!notice.empty()&&notice!=g.accessNotice)MessageBoxW(g.hwnd,util::Widen(notice).c_str(),L"ARType · доступ к программе",MB_OK|MB_ICONINFORMATION);
+    g.accessNotice=notice;
 }
 
 bool testNavigationIconColors(bool dark) {

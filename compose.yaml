@@ -31,6 +31,8 @@ services:
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-google/gemma-3-4b-it}
       TRUST_PROXY: '1'
+      DOWNLOADS_DIRECTORY: /app/downloads
+    volumes: ['./releases:/app/downloads:ro']
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
