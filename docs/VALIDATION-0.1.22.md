@@ -29,9 +29,11 @@ Verified on 21 October 2026. Native product source: `a9c0641`; subsequent
   The new production-popup integration test checks error propagation, unchanged
   text and selected language, and opens the actual settings window on Languages.
   This test injects the language-policy error; it is not a physical hotkey test.
-- [CI for native product source](https://github.com/HonkyMan/ARType/actions/runs/39585768241):
-  all three jobs passed. Windows includes compile, self-tests, EXE installation,
-  installed self-tests and uninstall. macOS includes full Xcode tests.
+- [CI for reviewed source `8a6e464`](https://github.com/HonkyMan/ARType/actions/runs/39588070309):
+  all three jobs passed, including the additional integration coverage. Windows
+  includes compile, self-tests, EXE installation, installed self-tests and
+  uninstall. macOS includes full Xcode tests. Native shipping source is unchanged
+  from `a9c0641`.
 - Deployment/packaging tests: **16/16 passed**.
 - Chrome on isolated fixtures: paid Plus overview and Business-only creation in
   English/Russian; 390px mobile view without horizontal overflow.
@@ -52,9 +54,19 @@ Verified on 21 October 2026. Native product source: `a9c0641`; subsequent
   their source commit in `PACKAGE.json`; local credentials are excluded.
 - `/Applications/ARType.app` was updated to 0.1.22 with previous bundles retained
   under `.local/backups/plus-languages-20261021/`. Real Google/device sign-in as adt
-  succeeded and the installed client displayed all ten languages. macOS required
-  renewed Accessibility permission for this unsigned replacement; that OS grant
-  is separate from successful login and language synchronization.
+  succeeded and the installed client displayed all ten languages. The user
+  renewed Accessibility permission for this unsigned replacement; the client
+  reports permission granted and both global shortcuts registered.
+- After a physical Option+D press, the user confirmed the translation appeared.
+  At 11:15:12 UTC, native diagnostics recorded successful Accessibility capture
+  of the 35-character control phrase, followed by successful managed translation
+  in 1,616 ms. The real server independently recorded a successful request at
+  11:15:12 UTC (35 characters, 58 input tokens, 11 output tokens, 1,556 ms).
+  TextEdit retained the original selection, as expected for popup preview.
+  Replacement and disabled-language recovery remain covered by the integration
+  suite above; this manual check proves the physical shortcut, capture and real
+  server translation path. Targeted synthetic keypresses were not used as proof
+  of global hotkey behavior.
 
 ## Distribution limits
 
