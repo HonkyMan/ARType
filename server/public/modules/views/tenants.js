@@ -136,7 +136,7 @@ const rs=details.recent;return `<section class="panel">
       <button type="button" class="secondary small" data-tenant="${t.id}" aria-label="${tr('open')} ${esc(t.name)}">${tr('open_383')}</button></article>`).join('');
     shell(`${personalSummary(me)}<section class="panel"><div class="panel-head"><h2>${tr('business_organizations')}</h2><span class="muted">${organizations.length}</span></div>
       ${cards ? searchBox(tr('find_a_workspace')) + cards + noMatches() : `<div class="empty"><h2>${tr('no_business_organizations')}</h2><p>${me.operator ? tr('create_an_organization_assign_an_owner_and_choose_a_translation') : tr(me.tenants.some(t=>t.plan==='plus')?'business_optional_for_personal':'create_a_personal_plus_workspace_or_a_business_organization')}</p>${button(me.operator ? tr('create_organization_300') : tr(me.tenants.some(t=>t.plan==='plus')?'create_business':'choose_plan'), me.operator ? 'new-tenant' : 'new-workspace', 'secondary')}</div>`}
-      </section>`, tr('workspaces'), tr('teams_app_access_and_translation_settings'), me.operator ? button(tr('create_organization'), 'new-tenant') : button(tr(me.tenants.some(t=>t.plan==='plus')?'create_business':'choose_plan'), 'new-workspace'));
+      </section>`, tr('workspaces'), tr(me.tenants.some(t=>t.plan==='plus')?'personal_and_business_overview':'teams_app_access_and_translation_settings'), me.operator ? button(tr('create_organization'), 'new-tenant') : button(tr(me.tenants.some(t=>t.plan==='plus')?'create_business':'choose_plan'), 'new-workspace'));
   }
 
   function newTenant() {

@@ -9,6 +9,7 @@ tests=(managed-protocol replacement-safety clipboard-policy worker-pool request-
 for test in "${tests[@]}"; do
   sources=("windows/tests/$test.cpp")
   if [[ "$test" == managed-protocol || "$test" == crash-metadata ]]; then sources+=(windows/src/Json.cpp); fi
+  if [[ "$test" == managed-protocol ]]; then sources+=(windows/src/Language.cpp); fi
   "$compiler" "${flags[@]}" "${sources[@]}" -o "$temporary/$test"
   "$temporary/$test"
   printf '%s passed\n' "$test"

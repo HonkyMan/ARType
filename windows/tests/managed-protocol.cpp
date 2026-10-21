@@ -87,6 +87,16 @@ static int checkManagedResponse() {
 }
 
 int main() {
+    const auto policy=json::Parse(R"({"languages":["ru","en","bn","hi","zh","es","fr","ar","pt","id"]})");
+    assert(managed::AllowedLanguages(policy).size()==10);
+    assert(managed::LanguagePermitted(policy,Language::Bengali));
+    const auto disabled=json::Parse(R"({"languages":["ru","en","unknown","en"]})");
+    assert(managed::AllowedLanguages(disabled).size()==2);
+    assert(!managed::LanguagePermitted(disabled,Language::Bengali));
+    assert(managed::IsLanguageSettingsLink("artype://settings/languages"));
+    assert(!managed::IsLanguageSettingsLink("https://evil.test/settings/languages"));
+    assert(!managed::IsLanguageSettingsLink("artype://settings/languages?command=bad"));
+
     auto blocked=json::Parse(R"({"tenants":[{"id":"one","can_translate":true},{"id":"two","can_translate":false,"access_message":"Balance is unpaid"}]})");
     assert(managed::AccessNotice(blocked,"two")=="Balance is unpaid");
     assert(managed::AccessNotice(blocked,"one").empty());

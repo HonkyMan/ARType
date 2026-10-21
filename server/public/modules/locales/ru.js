@@ -1,4 +1,5 @@
 export default {
+  "personal_and_business_overview": "Ваша личная подписка и организации Business, в которых вы участвуете.",
   "subscription_exists": "Уже оформлена",
   "personal_separate_from_business": "Ваша личная подписка. Организации Business ниже предназначены для совместной работы.",
   "manage_personal_subscription": "Управлять подпиской",

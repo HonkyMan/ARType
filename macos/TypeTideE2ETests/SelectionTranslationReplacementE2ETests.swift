@@ -16,6 +16,13 @@ private struct MockStreamingProvider: TranslationProvider {
     }
 }
 
+private struct DisabledLanguageProvider: TranslationProvider {
+    let id = "e2e-disabled-language"
+    func stream(_ request: TranslationRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { $0.finish(throwing: TranslationError.languageUnavailable) }
+    }
+}
+
 @MainActor
 final class SelectionTranslationReplacementE2ETests: XCTestCase {
     override func tearDown() async throws {
@@ -23,6 +30,39 @@ final class SelectionTranslationReplacementE2ETests: XCTestCase {
         TranslationService.shared.providerOverride = nil
         TextReplacer.replacementOverride = nil
         try await super.tearDown()
+    }
+
+    func testDisabledLanguageShowsRecoveryWithoutReplacingTheSelection() async throws {
+        let oldNative = LanguageConfig.sourceLanguage
+        let oldForeign = LanguageConfig.targetLanguage
+        let oldSection = SettingsNavigation.shared.selection
+        defer {
+            LanguageConfig.sourceLanguage = oldNative
+            LanguageConfig.targetLanguage = oldForeign
+            SettingsNavigation.shared.selection = oldSection
+            NSApp.windows.filter { $0.title == "ARType" }.forEach { $0.orderOut(nil) }
+        }
+        LanguageConfig.sourceLanguage = .russian
+        LanguageConfig.targetLanguage = .bengali
+        SettingsNavigation.shared.selection = .general
+        TranslationService.shared.providerOverride = DisabledLanguageProvider()
+        var editor = "Привет, команда!"
+        TextReplacer.replacementOverride = { value, _ in editor = value }
+        TriggerController.shared.presentRead(text: editor, element: nil, range: nil,
+            dismissOnInteraction: false, replacementTarget: ReplacementTarget { _ in true })
+        let model = try XCTUnwrap(PopupController.shared.currentModel)
+        try await waitUntil("disabled-language error") { model.errorText != nil }
+        XCTAssertTrue(PopupController.shared.isVisible)
+        XCTAssertEqual(model.translation, "")
+        XCTAssertEqual(editor, "Привет, команда!")
+        XCTAssertEqual(LanguageConfig.targetLanguage, .bengali)
+        let recovery = try XCTUnwrap(model.settingsLink)
+        // Exercise the production action used by the error's settings button.
+        PopupController.shared.close()
+        SettingsOpener.open(recovery)
+        XCTAssertEqual(SettingsNavigation.shared.selection, .language)
+        XCTAssertTrue(NSApp.windows.contains { $0.title == "ARType" && $0.isVisible })
+        XCTAssertFalse(PopupController.shared.isVisible)
     }
 
     func testSelectedTextStreamsIntoPopupAndReplaceUpdatesEditor() async throws {

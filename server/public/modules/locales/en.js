@@ -1,4 +1,5 @@
 export default {
+  "personal_and_business_overview": "Your personal subscription and the Business organizations you belong to.",
   "subscription_exists": "Already created",
   "personal_separate_from_business": "Your personal subscription. Business organizations below are for teamwork.",
   "manage_personal_subscription": "Manage subscription",

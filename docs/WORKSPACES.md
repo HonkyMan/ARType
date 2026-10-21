@@ -19,6 +19,31 @@ installation registration is closed until these defaults are configured.
 `GET /api/plans` is public and returns only prices and registration availability.
 The operator-only organization form remains available for manual Business setup.
 
+The overview shows the signed-in user's own Plus summary separately above the
+Business organization list. An existing Plus owner can manage that subscription
+or create Business; the creation screen never offers a second Plus subscription.
+Personal subscriptions belonging to other users remain in the paginated Users
+directory, not in workspace navigation.
+
+## Live language policy
+
+Plus languages inherit the current `plan_defaults.plus.languages` at read time,
+including subscriptions created before the policy changed. Business retains its
+per-workspace list. Provider/model/quota defaults still apply only at creation.
+`/api/me`, workspace details, `/api/tenants/:id/language-policy`, and translation
+authorization use the same effective language resolver. The policy endpoint
+requires membership (or platform administration), accepts desktop bearer
+sessions, and never exposes provider credentials or changes billing.
+
+Native clients from 0.1.22 refresh profiles every 30 seconds and validate the
+current policy before every translation. Failed policy requests do not bypass
+authorization. A disabled selected language stays selected and visibly marked;
+translation shows an error with `artype://settings/languages` recovery. The server
+also rejects disallowed languages before invoking the AI provider. Install
+0.1.22 once to obtain synchronization; toggling the ten supported languages then
+requires no client rebuild. Adding an entirely new language still needs client
+support and a release.
+
 ## Billing
 
 Initial USD monthly prices: Plus 500 cents including the personal seat and AI;

@@ -818,6 +818,11 @@ test('Plus languages are a live plan policy for existing subscribers and device 
   const endpoint=`/api/tenants/${plus.id}/language-policy`;
   assert.equal((await call(endpoint,{actor:stranger})).status,403);
   assert.deepEqual((await call(endpoint,{actor:owner})).data,{tenant_id:plus.id,languages:policy.languages});
+  const verifier='f'.repeat(64);
+  const device=(await call('/api/device/start',{method:'POST',body:{challenge:hash(verifier)}})).data;
+  assert.equal((await call(`/api/device/${device.id}/approve`,{actor:owner,method:'POST',body:{code:device.code}})).status,200);
+  const grant=(await call('/api/device/poll',{method:'POST',body:{id:device.id,poll_token:device.poll_token,verifier}})).data;
+  assert.deepEqual((await call(endpoint,{headers:{Authorization:`Bearer ${grant.token}`}})).data.languages,policy.languages);
   const request=target=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:plus.id,request_id:randomUUID(),text:'Hello',source:'en',target}});
   assert.equal((await request('bn')).status,200);
   assert.equal((await call('/api/plan-defaults/plus',{actor:op,method:'PUT',body:{...policy,languages:['en','ru']}})).status,200);
