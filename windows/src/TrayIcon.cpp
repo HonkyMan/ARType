@@ -4,8 +4,7 @@
 
 namespace {
 enum MenuId : UINT {
-    kMenuUpdate = 1,
-    kMenuToggle,
+    kMenuToggle = 1,
     kMenuReadHint,
     kMenuRewriteHint,
     kMenuSettings,
@@ -36,7 +35,7 @@ void TrayIcon::add(HWND owner, UINT callbackMessage) {
                                    IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                    GetSystemMetrics(SM_CYSMICON), 0);
     if (!nid_.hIcon) nid_.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    wcscpy_s(nid_.szTip, L"TypeTide");
+    wcscpy_s(nid_.szTip, L"ARType");
     added_ = Shell_NotifyIconW(NIM_ADD, &nid_);
     nid_.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &nid_);
@@ -49,17 +48,18 @@ void TrayIcon::remove() {
     }
 }
 
+void TrayIcon::setStatus(const std::wstring& text) {
+    wcsncpy_s(nid_.szTip, text.c_str(), _TRUNCATE);
+    nid_.uFlags = NIF_TIP;
+    if (added_) Shell_NotifyIconW(NIM_MODIFY, &nid_);
+}
+
 void TrayIcon::showMenu(HWND owner) {
     const Settings& s = Settings::shared();
     HMENU menu = CreatePopupMenu();
 
-    if (updateAvailable_) {
-        AppendMenuW(menu, MF_STRING, kMenuUpdate, L"⬇ New update available");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    }
-
     AppendMenuW(menu, MF_STRING | (s.enabled ? MF_CHECKED : 0), kMenuToggle,
-                s.enabled ? L"TypeTide is On" : L"TypeTide is Off");
+                s.enabled ? L"ARType is On" : L"ARType is Off");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
     std::wstring readHint = std::wstring(actionName(s.readShortcutAction)) + L":  " + s.readShortcut.displayString();
@@ -69,7 +69,7 @@ void TrayIcon::showMenu(HWND owner) {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
     AppendMenuW(menu, MF_STRING, kMenuSettings, L"Settings…");
-    AppendMenuW(menu, MF_STRING, kMenuQuit, L"Quit TypeTide");
+    AppendMenuW(menu, MF_STRING, kMenuQuit, L"Quit ARType");
 
     POINT pt{};
     GetCursorPos(&pt);
@@ -79,9 +79,6 @@ void TrayIcon::showMenu(HWND owner) {
     DestroyMenu(menu);
 
     switch (cmd) {
-    case kMenuUpdate:
-        if (onOpenReleases) onOpenReleases();
-        break;
     case kMenuToggle:
         if (onToggleEnabled) onToggleEnabled();
         break;

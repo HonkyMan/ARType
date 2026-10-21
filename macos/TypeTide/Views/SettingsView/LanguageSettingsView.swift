@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct LanguageSettingsView: View {
+    @ObservedObject private var account = ManagedAccount.shared
     @State private var selectedLanguage = LanguageConfig.sourceLanguage
     @State private var selectedTargetLanguage = LanguageConfig.targetLanguage
     @State private var readDirection = AppSettings.readDirection
@@ -18,7 +19,8 @@ struct LanguageSettingsView: View {
         Form {
             Section {
                 Picker("Native language", selection: $selectedLanguage) {
-                    ForEach(Language.allCases) { language in
+                    if !account.allowedLanguages.contains(selectedLanguage) { Text(selectedLanguage.displayName + " · недоступен").tag(selectedLanguage).disabled(true) }
+                    ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
                     }
@@ -29,7 +31,8 @@ struct LanguageSettingsView: View {
                 }
 
                 Picker("Foreign language", selection: $selectedTargetLanguage) {
-                    ForEach(Language.allCases) { language in
+                    if !account.allowedLanguages.contains(selectedTargetLanguage) { Text(selectedTargetLanguage.displayName + " · недоступен").tag(selectedTargetLanguage).disabled(true) }
+                    ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
                     }
@@ -39,6 +42,11 @@ struct LanguageSettingsView: View {
                     LanguageConfig.targetLanguage = newLanguage
                 }
 
+                if !account.allowedLanguages.contains(selectedLanguage) || !account.allowedLanguages.contains(selectedTargetLanguage) {
+                    Label("Выбранный язык отключён. Выберите доступные языки; прежняя пара сохранена до вашего изменения.", systemImage:"exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Список языков обновляется с сервера автоматически. Изменения администратора применяются без переустановки приложения.").font(.caption).foregroundStyle(.secondary)
                 if selectedLanguage == selectedTargetLanguage {
                     HStack(alignment: .top, spacing: 10) {
                         IconBadge(symbol: "exclamationmark.triangle.fill", color: .red, size: 20)
@@ -57,7 +65,7 @@ struct LanguageSettingsView: View {
                     .background(Color.red.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {
-                    SettingsNote(text: "TypeTide translates between \(selectedLanguage.shortName) and \(selectedTargetLanguage.shortName). Make sure your AI model supports both.")
+                    SettingsNote(text: "ARType translates between \(selectedLanguage.shortName) and \(selectedTargetLanguage.shortName). Make sure your AI model supports both.")
                 }
             } header: {
                 SettingsSectionHeader(symbol: "globe", color: .green,
@@ -95,5 +103,6 @@ struct LanguageSettingsView: View {
 
         }
         .settingsPage("Language")
+        .task { await account.refresh() }
     }
 }

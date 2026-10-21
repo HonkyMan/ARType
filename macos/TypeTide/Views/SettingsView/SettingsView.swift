@@ -10,13 +10,16 @@ import SwiftUI
 // MARK: - Main Settings Window
 
 struct SettingsView: View {
-    @State private var selection: PreferencesSection = .general
-    @AppStorage(AppSettings.Keys.hasCompletedFirstLaunch) private var hasCompletedFirstLaunch = false
+    @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
-                List(PreferencesSection.allCases, selection: $selection) { section in
+                VStack(alignment: .leading) {
+                    HStack { Image("BrandMark").resizable().aspectRatio(contentMode:.fit).frame(width:30,height:30); Text("ARType").font(.title2.bold()) }
+                    Text("Рабочий язык вашей команды").font(.caption).foregroundStyle(.secondary)
+                }.padding(16)
+                List(PreferencesSection.allCases, selection: $navigation.selection) { section in
                     Label {
                         Text(section.rawValue)
                     } icon: {
@@ -28,21 +31,11 @@ struct SettingsView: View {
             }
             .frame(minWidth: 180, idealWidth: 190, maxWidth: 220)
 
-            if !hasCompletedFirstLaunch && selection == .general {
-                FirstLaunchView { section in
-                    selection = section
-                } finish: {
-                    hasCompletedFirstLaunch = true
-                    selection = .general
-                }
-            } else {
-                switch selection {
+                switch navigation.selection {
                 case .general:
-                    GeneralSettingsView()
+                    ManagedAccountView()
                 case .behavior:
                     BehaviorSettingsView()
-                case .backend:
-                    BackendSettingsView()
                 case .language:
                     LanguageSettingsView()
                 case .shortcuts:
@@ -51,12 +44,10 @@ struct SettingsView: View {
                     SkipAppsSettingsView()
                 case .diagnostics:
                     DiagnosticsSettingsView()
-                case .about:
-                    AboutView()
                 }
-            }
         }
         .frame(minWidth: 780, minHeight: 560)
+        .tint(TypeTideTheme.accent)
     }
 }
 

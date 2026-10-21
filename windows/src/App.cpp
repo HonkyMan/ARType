@@ -1,7 +1,6 @@
 #include "App.h"
 #include "Hooks.h"
 #include "LocalDiagnostics.h"
-#include "OllamaModels.h"
 #include "PopupWindow.h"
 #include "SelectionIcon.h"
 #include "SelectionMonitor.h"
@@ -9,19 +8,23 @@
 #include "SettingsWindow.h"
 #include "TextReplacer.h"
 #include "Translator.h"
-#include "UpdateChecker.h"
 #include "Util.h"
+#include "ManagedAccount.h"
+#include "ManagedProtocol.h"
+#include "Credentials.h"
+#include "WorkerPool.h"
 #include <shellapi.h>
 #include <psapi.h>
 #include <memory>
 #include <mutex>
-#include <thread>
 
 namespace {
 constexpr int kReadHotkeyId = 1;
 constexpr int kRewriteHotkeyId = 2;
 // 超过这个长度不翻译：LLM 又慢又贵，弹窗也展示不下
 constexpr size_t kMaxInputChars = 5000;
+constexpr UINT_PTR kShutdownTimer = 4101;
+constexpr UINT_PTR kPolicyTimer = 4102;
 } // namespace
 
 App& App::shared() {
@@ -47,7 +50,7 @@ bool App::init(HINSTANCE inst) {
     RegisterClassW(&wc);
 
     // 隐藏主窗口（顶层不可见；托盘与热键的宿主）
-    hwnd_ = CreateWindowExW(0, kAppWindowClass, L"TypeTide", 0, 0, 0, 0, 0,
+    hwnd_ = CreateWindowExW(0, kAppWindowClass, L"ARType", 0, 0, 0, 0, 0,
                             nullptr, nullptr, inst, nullptr);
     if (!hwnd_) return false;
 
@@ -58,30 +61,33 @@ bool App::init(HINSTANCE inst) {
         applyEnabledState();
     };
     tray_.onOpenSettings = [this] { openSettings(); };
-    tray_.onOpenReleases = [] { updatechecker::OpenReleasesPage(); };
     tray_.onQuit = [this] { quit(); };
     tray_.add(hwnd_, WM_APP_TRAY);
     // explorer.exe 重启后托盘图标会消失，收到 TaskbarCreated 时重挂
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
 
     applyEnabledState();
+    SetTimer(hwnd_,kPolicyTimer,30000,nullptr);
 
     // 首次启动：打开设置窗口，让用户立刻完成配置
     Settings& s = Settings::shared();
     if (!s.hasCompletedFirstLaunch || !shortcutIssue_.empty()) {
         openSettings();
-    }
-
-    updatechecker::CheckIfDue(hwnd_, WM_APP_UPDATE);
-
-    // 配置的 Ollama 模型未安装时自动挑一个已装的（避免开箱即败）。
-    // 网络在工作线程，Settings 的读写回到主线程（WM_APP_MODELS）。
-    ollamamodels::FetchInstalledAsync(hwnd_, WM_APP_MODELS);
-
+    } else if(const auto token=credentials::LoadSessionToken();!token.empty())account::FetchProfile(hwnd_,WM_APP_ACCOUNT_STATUS,token);
     return true;
 }
 
+void App::cancelTranslations() {
+    ++contextGeneration_;
+    currentReq_=0;
+    translator::CancelAll();
+    replacer::CancelAll();
+    PopupWindow::shared().close();
+    SelectionIcon::shared().hide();
+}
+
 void App::applyEnabledState() {
+    if (shuttingDown_) return;
     UnregisterHotKey(hwnd_, kReadHotkeyId);
     UnregisterHotKey(hwnd_, kRewriteHotkeyId);
     SelectionMonitor::shared().stop();
@@ -93,6 +99,7 @@ void App::applyEnabledState() {
 
     const Settings& s = Settings::shared();
     if (!s.enabled) {
+        cancelTranslations();
         SettingsWindow::refreshShortcutStatus();
         return;
     }
@@ -156,18 +163,25 @@ void App::setupSelectionTrigger() {
 }
 
 void App::openSettings() {
+    if (shuttingDown_) return;
     SettingsWindow::open(hwnd_, !shortcutIssue_.empty());
 }
 
 void App::quit() {
-    PopupWindow::shared().close();
-    SelectionIcon::shared().hide();
+    if (shuttingDown_) return;
+    shuttingDown_ = true;
+    UnregisterHotKey(hwnd_, kReadHotkeyId);
+    UnregisterHotKey(hwnd_, kRewriteHotkeyId);
+    cancelTranslations();
+    account::Cancel();
     SelectionMonitor::shared().stop();
-    translator::CancelAll();
-    tray_.remove();
-    // 直接结束进程：分离的工作线程（流式翻译/替换）不再有机会
-    // 在静态对象析构后继续跑（那是退出崩溃的经典来源）。
-    ExitProcess(0);
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
+        EnableWindow(window, FALSE);
+        return TRUE;
+    }, 0);
+    tray_.setStatus(L"ARType · Завершение фоновых операций…");
+    workers::Shared().stop();
+    SetTimer(hwnd_, kShutdownTimer, 50, nullptr);
 }
 
 // ---------- 方向决策（与 macOS resolveDirection 一致）----------
@@ -232,7 +246,8 @@ void App::performShortcutAction(ShortcutAction action) {
 void App::handleRead(std::optional<Language> targetOverride) {
     const Settings& s = Settings::shared();
     util::Log("handleRead enabled=%d", s.enabled);
-    if (!s.enabled || foregroundAppSkipped()) return;
+    if (shuttingDown_ || !s.enabled || foregroundAppSkipped()) return;
+    cancelTranslations();
 
     // UIA 快路径在主线程（无睡眠）；拿不到再去工作线程走剪贴板兜底
     // （兜底要等最多 400ms，主线程睡了低级钩子会被系统摘掉）
@@ -243,13 +258,16 @@ void App::handleRead(std::optional<Language> targetOverride) {
         return;
     }
     HWND hwnd = hwnd_;
-    std::thread([hwnd, targetOverride] {
-        auto copied = capture::ClipboardFallbackCopy();
+    const auto generation=contextGeneration_.load();
+    const bool accepted = workers::Shared().submit([this, hwnd, targetOverride, generation](std::stop_token stop) {
+        const auto cancelled = [this, generation, stop] { return stop.stop_requested() || contextGeneration_.load() != generation; };
+        auto copied = capture::ClipboardFallbackCopy(cancelled);
         capture::Capture* cap = nullptr;
         if (copied) {
             diagnostics::Record("selectionCapture", "success", {}, "clipboardFallback", {}, -1, -1,
                                 (int)copied->size());
             cap = new capture::Capture;
+            cap->generation=generation;
             cap->text = *copied;
             cap->anchor = capture::CursorAnchor();
             cap->hasAnchor = true;
@@ -257,7 +275,9 @@ void App::handleRead(std::optional<Language> targetOverride) {
         else diagnostics::Record("selectionCapture", "failure");
         if (!PostMessageW(hwnd, WM_APP_READ_CAPTURED,
                           targetOverride ? (WPARAM)((int)*targetOverride + 1) : 0, (LPARAM)cap)) delete cap;
-    }).detach();
+    }, [](std::exception_ptr) { diagnostics::Record("selectionCapture", "failure", {}, {}, "worker"); });
+    if (!accepted) showErrorPopup(L"", targetOverride.value_or(s.nativeLanguage), capture::CursorAnchor(),
+                                 L"Фоновые операции заняты или приложение завершает работу.");
 }
 
 bool App::rejectIfTooLong(const capture::Capture& cap) {
@@ -271,7 +291,9 @@ bool App::rejectIfTooLong(const capture::Capture& cap) {
 }
 
 void App::presentRead(const capture::Capture& cap, std::optional<Language> targetOverride) {
+    if (shuttingDown_) return;
     if (rejectIfTooLong(cap)) return;
+    cancelTranslations();
     const Settings& s = Settings::shared();
     RECT anchor = cap.hasAnchor ? cap.anchor : capture::CursorAnchor();
     Direction dir = targetOverride ? Direction{lang::Detect(cap.text), *targetOverride}
@@ -284,12 +306,13 @@ void App::presentRead(const capture::Capture& cap, std::optional<Language> targe
 
     PopupWindow& popup = PopupWindow::shared();
     popup.show(cap.text, dir.to, anchor, /*showReplace=*/true);
-    popup.onReplace = [this] {
+    popup.onReplace = [this, destination = cap.replacementTarget, original = cap.text, anchor] {
         std::wstring t = PopupWindow::shared().translation();
         if (util::Trim(t).empty()) return;
         bool selectAll = currentReplaceSelectAll_;
+        const auto language = PopupWindow::shared().target();
         PopupWindow::shared().close();
-        replacer::ReplaceAsync(std::move(t), selectAll);
+        replaceOrOfferCopy(std::move(t), selectAll, destination, original, language, anchor);
     };
     popup.onRetarget = [this](Language newTarget) {
         translator::Cancel(currentReq_);
@@ -317,8 +340,8 @@ void App::startStream(const std::wstring& text, std::optional<Language> from, La
             if (!PostMessageW(hwnd, WM_APP_TR_DELTA, (WPARAM)id, (LPARAM)payload))
                 delete payload;
         },
-        [hwnd](uint64_t id, bool ok, const std::wstring& error) {
-            auto* payload = new DoneMsg{ok, error};
+        [hwnd](uint64_t id, bool ok, const std::wstring& error, bool languageSettings) {
+            auto* payload = new DoneMsg{ok, error, languageSettings};
             if (!PostMessageW(hwnd, WM_APP_TR_DONE, (WPARAM)id, (LPARAM)payload))
                 delete payload;
         });
@@ -328,7 +351,8 @@ void App::startStream(const std::wstring& text, std::optional<Language> from, La
 
 void App::handleRewrite(std::optional<Language> targetOverride) {
     const Settings& s = Settings::shared();
-    if (!s.enabled || foregroundAppSkipped()) return;
+    if (shuttingDown_ || !s.enabled || foregroundAppSkipped()) return;
+    cancelTranslations();
 
     // 与 handleRead 同理：UIA 主线程快路径，剪贴板兜底进工作线程
     if (auto cap = capture::UIACaptureForRewrite()) {
@@ -338,13 +362,16 @@ void App::handleRewrite(std::optional<Language> targetOverride) {
         return;
     }
     HWND hwnd = hwnd_;
-    std::thread([hwnd, targetOverride] {
-        auto copied = capture::ClipboardFallbackCopy();
+    const auto generation=contextGeneration_.load();
+    const bool accepted = workers::Shared().submit([this, hwnd, targetOverride, generation](std::stop_token stop) {
+        const auto cancelled = [this, generation, stop] { return stop.stop_requested() || contextGeneration_.load() != generation; };
+        auto copied = capture::ClipboardFallbackCopy(cancelled);
         capture::Capture* cap = nullptr;
         if (copied) {
             diagnostics::Record("selectionCapture", "success", {}, "clipboardFallback", {}, -1, -1,
                                 (int)copied->size());
             cap = new capture::Capture;
+            cap->generation=generation;
             cap->text = *copied;
             cap->anchor = capture::CursorAnchor();
             cap->hasAnchor = true;
@@ -352,7 +379,9 @@ void App::handleRewrite(std::optional<Language> targetOverride) {
         else diagnostics::Record("selectionCapture", "failure");
         if (!PostMessageW(hwnd, WM_APP_REWRITE_CAPTURED,
                           targetOverride ? (WPARAM)((int)*targetOverride + 1) : 0, (LPARAM)cap)) delete cap;
-    }).detach();
+    }, [](std::exception_ptr) { diagnostics::Record("selectionCapture", "failure", {}, {}, "worker"); });
+    if (!accepted) showErrorPopup(L"", targetOverride.value_or(s.nativeLanguage), capture::CursorAnchor(),
+                                 L"Фоновые операции заняты или приложение завершает работу.");
 }
 
 void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> targetOverride) {
@@ -373,12 +402,13 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
 
         PopupWindow& popup = PopupWindow::shared();
         popup.show(cap->text, dir.to, anchor, /*showReplace=*/true);
-        popup.onReplace = [this] {
+        popup.onReplace = [this, destination = cap->replacementTarget, original = cap->text, anchor] {
             std::wstring t = PopupWindow::shared().translation();
             if (util::Trim(t).empty()) return;
             bool selectAll = currentReplaceSelectAll_;
+            const auto language = PopupWindow::shared().target();
             PopupWindow::shared().close();
-            replacer::ReplaceAsync(std::move(t), selectAll);
+            replaceOrOfferCopy(std::move(t), selectAll, destination, original, language, anchor);
         };
         popup.onRetarget = [this](Language newTarget) {
             translator::Cancel(currentReq_);
@@ -406,17 +436,19 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
             std::wstring result;
         };
         auto state = std::make_shared<RewriteStreamState>();
+        const auto generation=contextGeneration_.load();
         translator::Stream(
             {c.text, d.from, d.to, style},
             [state](uint64_t, const std::wstring& delta) {
                 std::lock_guard lock(state->mutex);
                 state->result += delta;
             },
-            [hwnd, state, c, d](uint64_t, bool ok, const std::wstring& error) {
+            [hwnd, state, c, d, generation](uint64_t, bool ok, const std::wstring& error, bool languageSettings) {
                 std::lock_guard lock(state->mutex);
                 std::wstring cleaned = util::Trim(state->result);
                 const bool emptyResponse = ok && cleaned.empty();
                 auto* msg = new RewriteResult{
+                    generation,
                     ok && !cleaned.empty(),
                     std::move(cleaned),
                     emptyResponse ? L"Empty translation" : error,
@@ -425,26 +457,90 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
                     true,
                     c.text,
                     d.to,
+                    c.replacementTarget,
+                    languageSettings,
                 };
                 if (!PostMessageW(hwnd, WM_APP_REWRITE_DONE, 0, (LPARAM)msg)) delete msg;
             });
     }
 }
 
-void App::showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error) {
+void App::replaceOrOfferCopy(std::wstring text, bool selectAll,
+                            std::optional<replacement::Snapshot> target,
+                            std::wstring original, Language language, RECT anchor) {
+    const auto generation = contextGeneration_.load();
+    const auto window = hwnd_;
+    auto completed = std::make_shared<ReplacementResult>(
+        ReplacementResult{generation, replacement::Result::Failed, text, std::move(original), language, anchor});
+    replacer::ReplaceAsync(std::move(text), selectAll, std::move(target),
+        [window, completed](replacement::Result result) {
+            auto message = std::make_unique<ReplacementResult>(*completed);
+            message->result = result;
+            if (PostMessageW(window, WM_APP_REPLACEMENT_DONE, 0, reinterpret_cast<LPARAM>(message.get())))
+                message.release();
+        });
+}
+
+void App::showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error, bool languageSettings) {
     PopupWindow& popup = PopupWindow::shared();
     popup.show(original, target, anchor, /*showReplace=*/false);
     popup.onReplace = nullptr;
     popup.onRetarget = nullptr;
     popup.onRetry = nullptr;
     popup.onClosed = nullptr;
-    popup.setError(error);
+    popup.setError(error,languageSettings);
 }
 
 // ---------- 消息处理 ----------
 
 LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
+    if (shuttingDown_) {
+        // Keep this window alive until every sender exits. Drain payloads without
+        // presenting output or starting more work from a retiring account/context.
+        switch (msg) {
+        case WM_APP_TR_DELTA: delete reinterpret_cast<std::wstring*>(lp); return 0;
+        case WM_APP_TR_DONE: delete reinterpret_cast<DoneMsg*>(lp); return 0;
+        case WM_APP_REWRITE_DONE: delete reinterpret_cast<RewriteResult*>(lp); return 0;
+        case WM_APP_REPLACEMENT_DONE: delete reinterpret_cast<ReplacementResult*>(lp); return 0;
+        case WM_APP_ACCOUNT_STATUS: account::TakeUpdate(lp); return 0;
+        case WM_APP_READ_CAPTURED:
+        case WM_APP_REWRITE_CAPTURED: delete reinterpret_cast<capture::Capture*>(lp); return 0;
+        case WM_APP_TRAY: case WM_APP_OPEN_SETTINGS: case WM_HOTKEY: return 0;
+        }
+    }
     switch (msg) {
+    case WM_CLOSE:
+        quit();
+        return 0;
+    case WM_TIMER:
+        if(wp==kPolicyTimer&&!shuttingDown_){
+            if(const auto token=credentials::LoadSessionToken();!token.empty())account::FetchProfile(hwnd_,WM_APP_ACCOUNT_STATUS,token);
+            return 0;
+        }
+        if (wp == kShutdownTimer && shuttingDown_ && workers::Shared().exited()) {
+            KillTimer(hwnd_, kShutdownTimer);
+            // All senders have returned. Deliver remaining messages to their
+            // still-live windows so each typed payload is released exactly once.
+            MSG pending{};
+            while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
+                if (pending.message != WM_QUIT) DispatchMessageW(&pending);
+            }
+            diagnostics::Record("shutdown", "success", {}, {},
+                                workers::Shared().failures() ? "workerFailures" : "");
+            tray_.remove();
+            EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) -> BOOL {
+                DestroyWindow(window);
+                return TRUE;
+            }, 0);
+            PostQuitMessage(0);
+        }
+        return 0;
+    case WM_APP_ACCOUNT_STATUS: {
+        auto update = account::TakeUpdate(lp);
+        if(!update||!account::Current(update->generation)||!update->profile.isObject())return 0;
+        SettingsWindow::applyAccountProfile(update->profile);
+        return 0;
+    }
     case WM_HOTKEY:
         if (wp == kReadHotkeyId) performShortcutAction(Settings::shared().readShortcutAction);
         else if (wp == kRewriteHotkeyId) performShortcutAction(Settings::shared().rewriteShortcutAction);
@@ -471,7 +567,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
         auto* done = (DoneMsg*)lp;
         if ((uint64_t)wp == currentReq_ && PopupWindow::shared().isVisible()) {
             if (!done->ok)
-                PopupWindow::shared().setError(done->error);
+                PopupWindow::shared().setError(done->error,done->languageSettings);
             else if (util::Trim(PopupWindow::shared().translation()).empty())
                 PopupWindow::shared().setError(L"No translation returned");
             else
@@ -483,34 +579,39 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_APP_REWRITE_DONE: {
         auto* r = (RewriteResult*)lp;
+        if(r->generation!=contextGeneration_){delete r;return 0;}
         if (r->ok)
-            replacer::ReplaceAsync(std::move(r->text), r->isWholeField);
+            replaceOrOfferCopy(std::move(r->text), r->isWholeField, std::move(r->replacementTarget),
+                               std::move(r->original), r->target, r->anchor);
         else
-            showErrorPopup(r->original, r->target, r->anchor, r->error);
+            showErrorPopup(r->original, r->target, r->anchor, r->error,r->languageSettings);
         delete r;
         return 0;
     }
 
-    case WM_APP_UPDATE:
-        tray_.setUpdateAvailable(true);
-        return 0;
-
-    case WM_APP_OPEN_SETTINGS:
-        openSettings();
-        return 0;
-
-    case WM_APP_MODELS: {
-        // 工作线程拉回的已装模型列表；Settings 的比对与保存在主线程做
-        auto* models = (std::vector<std::wstring>*)lp;
-        ollamamodels::ApplyResolvedModels(*models);
-        ollamamodels::PreloadAsync();
-        delete models;
+    case WM_APP_REPLACEMENT_DONE: {
+        std::unique_ptr<ReplacementResult> result(reinterpret_cast<ReplacementResult*>(lp));
+        if (!result || result->generation != contextGeneration_ ||
+            result->result == replacement::Result::Cancelled || result->result == replacement::Result::Replaced) return 0;
+        auto& popup = PopupWindow::shared();
+        popup.show(result->original, result->language, result->anchor, false);
+        popup.onReplace = nullptr;
+        popup.onRetarget = nullptr;
+        popup.onRetry = nullptr;
+        popup.onClosed = nullptr;
+        popup.appendDelta(result->translation);
+        popup.setReplacementNotice(L"Автоматическая вставка недоступна. Скопируйте готовый перевод и вставьте его вручную.");
+        popup.finishTranslation();
         return 0;
     }
+    case WM_APP_OPEN_SETTINGS:
+        if(wp==1)SettingsWindow::openLanguageSettings(hwnd_);else openSettings();
+        return 0;
 
     case WM_APP_READ_CAPTURED: {
         auto* cap = (capture::Capture*)lp;
         if (cap) {
+            if(cap->generation!=contextGeneration_){delete cap;return 0;}
             std::optional<Language> target = wp ? std::optional<Language>((Language)((int)wp - 1)) : std::nullopt;
             presentRead(*cap, target);
             delete cap;
@@ -521,6 +622,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_REWRITE_CAPTURED: {
         auto* cap = (capture::Capture*)lp;
         if (cap) {
+            if(cap->generation!=contextGeneration_){delete cap;return 0;}
             std::optional<Language> target = wp ? std::optional<Language>((Language)((int)wp - 1)) : std::nullopt;
             proceedRewrite(*cap, target);
             delete cap;

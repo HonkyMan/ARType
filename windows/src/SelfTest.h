@@ -1,6 +1,6 @@
 //
-//  SelfTest.h — `TypeTide.exe --selftest` 的内建自检（JSON / 检测 / 设置 / 提示词等）。
-//  `--selftest-translate` 额外用当前 settings.json 的后端跑一次真实翻译。
+//  SelfTest.h — `ARType.exe --selftest` 的内建自检（JSON / language / settings / managed protocol）。
+//  `--selftest-translate` explicitly translates synthetic text via the configured ARType service.
 //
 #pragma once
 

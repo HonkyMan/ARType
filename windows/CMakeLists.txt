@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TypeTide VERSION 0.1.18 LANGUAGES CXX)
+project(TypeTide VERSION 0.1.22 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,12 +13,11 @@ add_executable(TypeTide WIN32
     src/Language.cpp
     src/Settings.cpp
     src/Credentials.cpp
+    src/ManagedAccount.cpp
     src/Clipboard.cpp
     src/Keyboard.cpp
     src/Http.cpp
     src/Translator.cpp
-    src/BuiltInModel.cpp
-    src/OllamaModels.cpp
     src/CrashDump.cpp
     src/SelectionCapture.cpp
     src/TextReplacer.cpp
@@ -29,11 +28,14 @@ add_executable(TypeTide WIN32
     src/TrayIcon.cpp
     src/SettingsWindow.cpp
     src/LaunchAtLogin.cpp
-    src/UpdateChecker.cpp
     src/SelfTest.cpp
     src/TypeTide.rc
     src/TypeTide.manifest
 )
+
+set(ARTYPE_SERVICE_URL "http://127.0.0.1:8080" CACHE STRING "ARType server origin")
+target_compile_definitions(TypeTide PRIVATE ARTYPE_SERVICE_URL="${ARTYPE_SERVICE_URL}")
+set_target_properties(TypeTide PROPERTIES OUTPUT_NAME ARType)
 
 target_compile_definitions(TypeTide PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
@@ -47,6 +49,6 @@ endif()
 
 target_link_libraries(TypeTide PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid comctl32
-    winhttp uiautomationcore dwmapi advapi32 shlwapi uxtheme dbghelp
-    comdlg32 bcrypt ws2_32
+    winhttp uiautomationcore dwmapi advapi32 shlwapi uxtheme
+    comdlg32 bcrypt
 )

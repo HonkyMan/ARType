@@ -7,62 +7,6 @@
 
 import AppKit
 
-struct StoredShortcutPreference: Codable {
-    let shortcut: KeyboardShortcutPreference?
-
-    private enum CodingKeys: String, CodingKey { case shortcut }
-
-    init(shortcut: KeyboardShortcutPreference?) {
-        self.shortcut = shortcut
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        guard container.contains(.shortcut) else {
-            throw DecodingError.keyNotFound(
-                CodingKeys.shortcut,
-                .init(codingPath: decoder.codingPath,
-                      debugDescription: "Stored shortcut wrapper requires a shortcut key")
-            )
-        }
-        shortcut = try container.decodeIfPresent(KeyboardShortcutPreference.self, forKey: .shortcut)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        if let shortcut {
-            try container.encode(shortcut, forKey: .shortcut)
-        } else {
-            try container.encodeNil(forKey: .shortcut)
-        }
-    }
-
-    static func decode(_ data: Data,
-                       defaultValue: KeyboardShortcutPreference) -> KeyboardShortcutPreference? {
-        if let stored = try? JSONDecoder().decode(Self.self, from: data) {
-            return stored.shortcut
-        }
-        // Migration: older releases encoded KeyboardShortcutPreference directly.
-        return (try? JSONDecoder().decode(KeyboardShortcutPreference.self, from: data)) ?? defaultValue
-    }
-}
-
-/// 翻译后端
-enum TranslationBackend: String, CaseIterable, Identifiable {
-    case builtIn
-    case ollama
-    case openai
-
-    var id: String { rawValue }
-    var displayName: String {
-        switch self {
-        case .builtIn: return "Built-in (Offline)"
-        case .ollama: return "Ollama"
-        case .openai: return "OpenAI-compatible"
-        }
-    }
-}
-
 /// 划词触发方式
 enum SelectionTrigger: String, CaseIterable, Identifiable {
     case none      // 仅快捷键
@@ -122,15 +66,7 @@ enum RewriteStyle: String, CaseIterable, Identifiable {
         case .polished: return "Polished"
         }
     }
-    /// 注入到 prompt 的风格指令；faithful 返回 nil
-    var instruction: String? {
-        switch self {
-        case .faithful: return nil
-        case .formal: return "Use a professional, formal tone."
-        case .casual: return "Use a natural, casual, conversational tone."
-        case .polished: return "Improve clarity and flow so it reads polished and native, while keeping the original meaning."
-        }
-    }
+
 }
 
 /// 全局设置。非 View 代码用静态访问；View 用 @AppStorage 直接绑定同名 key。
@@ -140,16 +76,6 @@ enum AppSettings {
 
     enum Keys {
         static let enabled = "isTypeTideEnabled"
-        static let backend = "translationBackend"
-
-        // OpenAI 兼容
-        static let openAIBaseURL = "openAIBaseURL"
-        static let openAIKey = "openAIKey"
-        static let openAIModel = "openAIModel"
-
-        // Ollama
-        static let ollamaModel = "selectedModel"
-
         // 语言：sourceLanguage = 用户母语，targetLanguage = 外语（见 LanguageConfig）
         // 触发快捷键
         static let readShortcut = "readShortcut"
@@ -175,46 +101,6 @@ enum AppSettings {
         get { d.object(forKey: Keys.enabled) as? Bool ?? true }
         set { d.set(newValue, forKey: Keys.enabled) }
     }
-
-    static var backend: TranslationBackend {
-        get { TranslationBackend(rawValue: d.string(forKey: Keys.backend) ?? "") ?? .builtIn }
-        set { d.set(newValue.rawValue, forKey: Keys.backend) }
-    }
-
-    // MARK: OpenAI 兼容
-    static var openAIBaseURL: String {
-        get { d.string(forKey: Keys.openAIBaseURL) ?? "https://api.openai.com/v1" }
-        set { d.set(newValue, forKey: Keys.openAIBaseURL) }
-    }
-    static var openAIKey: String {
-        get {
-            let stored = Credentials.cloudAPIKey()
-            if !stored.isEmpty { return stored }
-            // One-time migration from legacy plaintext UserDefaults storage.
-            let legacy = d.string(forKey: Keys.openAIKey) ?? ""
-            if !legacy.isEmpty, Credentials.saveCloudAPIKey(legacy) {
-                d.removeObject(forKey: Keys.openAIKey)
-            }
-            return legacy
-        }
-        set {
-            if Credentials.saveCloudAPIKey(newValue) {
-                d.removeObject(forKey: Keys.openAIKey)
-            }
-        }
-    }
-    static var openAIModel: String {
-        get { d.string(forKey: Keys.openAIModel) ?? "gpt-4o-mini" }
-        set { d.set(newValue, forKey: Keys.openAIModel) }
-    }
-
-    // MARK: Ollama
-    static var ollamaModel: String {
-        get { d.string(forKey: Keys.ollamaModel) ?? "qwen2.5:3b" }
-        set { d.set(newValue, forKey: Keys.ollamaModel) }
-    }
-    static var ollamaHost: String { OllamaConfig.host }
-    static var ollamaPort: Int { OllamaConfig.port }
 
     // MARK: 快捷键
     static var readShortcut: KeyboardShortcutPreference? {
@@ -265,19 +151,20 @@ enum AppSettings {
             .filter { !$0.isEmpty } ?? []
     }
 
-    static func shouldSkipFrontmostApplication() -> Bool {
-        guard !skipApps.isEmpty, let app = NSWorkspace.shared.frontmostApplication else { return false }
-        let candidates = [
+    static func applicationIdentifiers(_ app: NSRunningApplication?) -> [String] {
+        guard let app else { return [] }
+        return [
             app.localizedName,
             app.bundleIdentifier,
             app.bundleURL?.deletingPathExtension().lastPathComponent
-        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        ].compactMap { $0 }
+    }
 
-        return skipApps.contains { entry in
-            var normalized = entry.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if normalized.hasSuffix(".app") { normalized.removeLast(4) }
-            return candidates.contains(normalized)
-        }
+    static func shouldSkipFrontmostApplication() -> Bool {
+        TranslationActionPolicy.isExcluded(
+            applicationIdentifiers: applicationIdentifiers(NSWorkspace.shared.frontmostApplication),
+            exclusions: skipApps
+        )
     }
 
     private static func shortcut(forKey key: String,

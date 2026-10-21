@@ -3,6 +3,8 @@
 //  支持 object/array/string/number/bool/null，UTF-8 输入输出。
 //
 #pragma once
+#include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -35,7 +37,12 @@ public:
 
     bool asBool(bool def = false) const { return type_ == Type::Bool ? bool_ : def; }
     double asNumber(double def = 0) const { return type_ == Type::Number ? num_ : def; }
-    int asInt(int def = 0) const { return type_ == Type::Number ? (int)num_ : def; }
+    int asInt(int def = 0) const {
+        if (type_ != Type::Number || !std::isfinite(num_) ||
+            num_ < std::numeric_limits<int>::min() || num_ > std::numeric_limits<int>::max())
+            return def;
+        return static_cast<int>(num_);
+    }
     const std::string& asString() const { static std::string empty; return type_ == Type::String ? str_ : empty; }
 
     /// object[key]；不存在或非 object 时返回 Null 值引用

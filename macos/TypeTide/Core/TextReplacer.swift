@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import CoreGraphics
 
 enum TextReplacer {
 #if DEBUG
@@ -17,8 +18,17 @@ enum TextReplacer {
     /// 用译文替换。selectAll=true 时先 ⌘A 全选（整框改写），否则直接粘到当前选区。
     @MainActor
     @discardableResult
-    static func replace(with text: String, selectAll: Bool) async -> Bool {
+    static func replace(
+        with text: String, selectAll: Bool, target: ReplacementTarget? = nil,
+        pasteboard pb: NSPasteboard = .general,
+        press: @MainActor (CGKeyCode, Bool) -> Bool = { Keyboard.press($0, command: $1) },
+        pause: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
+    ) async -> Bool {
         let start = ContinuousClock.now
+        guard !Task.isCancelled, let target, target.isCurrent() else {
+            recordReplacement(outcome: "cancelled", start: start)
+            return false
+        }
 #if DEBUG
         if let replacementOverride {
             await replacementOverride(text, selectAll)
@@ -26,29 +36,42 @@ enum TextReplacer {
             return true
         }
 #endif
-        let pb = NSPasteboard.general
-        let saved = PasteboardHelper.snapshot()
+        let before = pb.changeCount
+        let saved = PasteboardHelper.snapshot(from: pb)
+        guard pb.changeCount == before, !Task.isCancelled, target.isCurrent() else {
+            recordReplacement(outcome: "cancelled", start: start)
+            return false
+        }
 
-        pb.clearContents()
-        pb.setString(text, forType: .string)
+        let clearedChangeCount = pb.clearContents()
+        guard pb.setString(text, forType: .string) else {
+            PasteboardHelper.restore(saved, ifUnchangedSince: clearedChangeCount, to: pb)
+            recordReplacement(outcome: "failure", start: start)
+            return false
+        }
+        let ownedChangeCount = pb.changeCount
+        defer { PasteboardHelper.restore(saved, ifUnchangedSince: ownedChangeCount, to: pb) }
 
         if selectAll {
-            guard Keyboard.press(Keyboard.aKey, command: true) else {
-                PasteboardHelper.restore(saved)
+            guard !Task.isCancelled, target.isCurrent(), pb.changeCount == ownedChangeCount,
+                  press(Keyboard.aKey, true) else {
                 recordReplacement(outcome: "failure", start: start)
                 return false
             }
-            try? await Task.sleep(nanoseconds: 40_000_000)
+            await pause(40_000_000)
         }
-        guard Keyboard.press(Keyboard.vKey, command: true) else {
-            PasteboardHelper.restore(saved)
+        guard !Task.isCancelled, target.isCurrent(afterSelectAll: selectAll),
+              pb.changeCount == ownedChangeCount else {
+            recordReplacement(outcome: "cancelled", start: start)
+            return false
+        }
+        guard press(Keyboard.vKey, true) else {
             recordReplacement(outcome: "failure", start: start)
             return false
         }
 
         // 等粘贴完成再还原剪贴板，避免还原把待粘贴内容覆盖掉
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        PasteboardHelper.restore(saved)
+        await pause(150_000_000)
         recordReplacement(outcome: "success", start: start)
         return true
     }

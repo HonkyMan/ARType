@@ -1,3 +1,6 @@
+#include "SettingsWindow.h"
+#include "ManagedAccount.h"
+#include "App.h"
 #include "PopupWindow.h"
 #include "BrandMark.h"
 #include "Clipboard.h"
@@ -11,7 +14,7 @@
 
 namespace {
 
-constexpr wchar_t kClassName[] = L"TypeTidePopup";
+constexpr wchar_t kClassName[] = L"ARTypePopup";
 constexpr UINT_PTR kCopiedTimer = 1;
 constexpr UINT_PTR kTideTimer = 2;
 
@@ -47,6 +50,8 @@ void PopupWindow::show(const std::wstring& original, Language target, RECT ancho
     original_ = original;
     translation_.clear();
     error_.clear();
+    languageSettings_=false;
+    replacementNotice_.clear();
     loading_ = true;
     copiedFlash_ = false;
     tidePhase_ = TidePhase::Waiting;
@@ -74,7 +79,7 @@ void PopupWindow::show(const std::wstring& original, Language target, RECT ancho
     (void)registered;
 
     hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                            kClassName, L"TypeTide", WS_POPUP,
+                            kClassName, L"ARType", WS_POPUP,
                             0, 0, 10, 10, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     util::Log("popup show hwnd=%p", (void*)hwnd_);
     if (!hwnd_) return;
@@ -130,14 +135,20 @@ void PopupWindow::finishTranslation() {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void PopupWindow::setError(const std::wstring& error) {
+void PopupWindow::setError(const std::wstring& error, bool languageSettings) {
     if (!hwnd_) return;
     error_ = error;
+    languageSettings_ = languageSettings;
     loading_ = false;
     tidePhase_ = TidePhase::Failed;
     KillTimer(hwnd_, kTideTimer);
     layoutAndResize();
     InvalidateRect(hwnd_, nullptr, TRUE);
+}
+
+void PopupWindow::setReplacementNotice(const std::wstring& notice) {
+    replacementNotice_ = notice;
+    if (hwnd_) { layoutAndResize(); InvalidateRect(hwnd_, nullptr, TRUE); }
 }
 
 void PopupWindow::setTarget(Language target) {
@@ -149,6 +160,8 @@ void PopupWindow::resetForRetranslate() {
     if (!hwnd_) return;
     translation_.clear();
     error_.clear();
+    languageSettings_=false;
+    replacementNotice_.clear();
     loading_ = true;
     tidePhase_ = TidePhase::Waiting;
     tideTick_ = settleTicks_ = 0;
@@ -193,7 +206,7 @@ void PopupWindow::layoutAndResize() {
     HFONT old = (HFONT)SelectObject(dc, fontBody_);
     std::wstring bodyText = !error_.empty() ? error_
                           : (translation_.empty() && loading_) ? original_
-                          : translation_;
+                          : replacementNotice_.empty() ? translation_ : replacementNotice_ + L"\n\n" + translation_;
     RECT rc{0, 0, contentW, 0};
     DrawTextW(dc, bodyText.c_str(), -1, &rc, DT_WORDBREAK | DT_CALCRECT);
     SelectObject(dc, old);
@@ -214,7 +227,7 @@ void PopupWindow::layoutAndResize() {
     scrollY_ = std::clamp(scrollY_, 0, std::max(0, textHeight_ - viewportHeight_));
 
     bool hasButtons = (!translation_.empty() && error_.empty()) ||
-                      (!error_.empty() && static_cast<bool>(onRetry));
+                      (!error_.empty() && (static_cast<bool>(onRetry)||languageSettings_));
     const int btnH = px(32);
     const int btnGap = px(ui::spacing::Medium);
 
@@ -230,9 +243,9 @@ void PopupWindow::layoutAndResize() {
     int btnY = height - padY - btnH;
     int replaceW = showReplace_ ? px(84) : 0;
     int copyW = px(70);
-    if (!error_.empty() && onRetry) {
+    if (!error_.empty() && (onRetry||languageSettings_)) {
         rcCopy_ = rcReplace_ = RECT{};
-        rcRetry_ = {width - padX - px(76), btnY, width - padX, btnY + btnH};
+        rcRetry_ = {width - padX - px(languageSettings_?230:76), btnY, width - padX, btnY + btnH};
     } else if (hasButtons) {
         rcRetry_ = {};
         int x = width - padX;
@@ -294,7 +307,7 @@ void PopupWindow::paint(HDC dc) {
     brand::DrawMark(dc, rcMark, ui::Accent);
     SetTextColor(dc, th.secondary);
     RECT rcBrand{rcMark.right + px(4), 0, client.right, headerH};
-    DrawTextW(dc, L"TypeTide", -1, &rcBrand, DT_SINGLELINE | DT_VCENTER);
+    DrawTextW(dc, L"ARType", -1, &rcBrand, DT_SINGLELINE | DT_VCENTER);
 
     // 目标语言 chip
     {
@@ -343,7 +356,8 @@ void PopupWindow::paint(HDC dc) {
                   DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
     } else {
         SetTextColor(dc, th.text);
-        DrawTextW(dc, translation_.c_str(), -1, &rcText,
+        const auto text = replacementNotice_.empty() ? translation_ : replacementNotice_ + L"\n\n" + translation_;
+        DrawTextW(dc, text.c_str(), -1, &rcText,
                   DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
     }
     RestoreDC(dc, saved);
@@ -446,8 +460,8 @@ void PopupWindow::paint(HDC dc) {
         drawButton(rcCopy_, copiedFlash_ ? L"Copied ✓" : L"Copy", false, hover_ == Region::Copy);
         if (showReplace_) drawButton(rcReplace_, L"Replace", true, hover_ == Region::Replace);
     }
-    if (!error_.empty() && onRetry)
-        drawButton(rcRetry_, L"Retry", true, hover_ == Region::Retry);
+    if (!error_.empty() && (onRetry||languageSettings_))
+        drawButton(rcRetry_, languageSettings_?L"Открыть настройки языков":L"Retry", true, hover_ == Region::Retry);
 }
 
 PopupWindow::Region PopupWindow::hitTest(POINT pt) const {
@@ -461,10 +475,11 @@ PopupWindow::Region PopupWindow::hitTest(POINT pt) const {
 
 void PopupWindow::showLangMenu() {
     HMENU menu = CreatePopupMenu();
-    for (size_t i = 0; i < std::size(lang::All); ++i) {
+    const auto languages=account::AllowedLanguages();
+    for (size_t i = 0; i < languages.size(); ++i) {
         UINT flags = MF_STRING;
-        if (lang::All[i] == target_) flags |= MF_CHECKED;
-        AppendMenuW(menu, flags, 100 + i, lang::DisplayName(lang::All[i]));
+        if (languages[i] == target_) flags |= MF_CHECKED;
+        AppendMenuW(menu, flags, 100 + i, lang::DisplayName(languages[i]));
     }
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
@@ -481,8 +496,8 @@ void PopupWindow::showLangMenu() {
     DestroyMenu(menu);
     if (prevFg && prevFg != hwnd_) SetForegroundWindow(prevFg);
 
-    if (cmd >= 100 && cmd < 100 + std::size(lang::All)) {
-        Language chosen = lang::All[cmd - 100];
+    if (cmd >= 100 && cmd < 100 + languages.size()) {
+        Language chosen = languages[cmd - 100];
         if (chosen != target_ && onRetarget) onRetarget(chosen);
     }
 }
@@ -577,7 +592,8 @@ LRESULT PopupWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             SetCapture(hwnd_);
             return 0;
         case Region::Retry:
-            if (onRetry) onRetry();
+            if (languageSettings_) {close();SettingsWindow::openLanguageSettings(App::shared().hwnd());}
+            else if (onRetry) onRetry();
             return 0;
         default:
             return 0;

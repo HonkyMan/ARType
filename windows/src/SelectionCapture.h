@@ -9,17 +9,21 @@
 #pragma once
 #include <windows.h>
 #include <optional>
+#include <cstdint>
 #include <string>
+#include "ReplacementSafety.h"
 
 namespace capture {
 
 struct Capture {
+    uint64_t generation = 0;
     std::wstring text;
     /// true = 取的是整个输入框（替换时需先全选）；false = 当前选区
     bool isWholeField = false;
     /// 选区屏幕矩形（物理像素）；hasAnchor=false 时无效
     RECT anchor{};
     bool hasAnchor = false;
+    std::optional<replacement::Snapshot> replacementTarget;
 };
 
 /// 读模式 UIA 取词（仅 UIA，不动剪贴板；主线程）。
@@ -32,7 +36,10 @@ std::optional<Capture> UIACaptureForRewrite();
 std::optional<Capture> UIASelectionOnly();
 
 /// 模拟 Ctrl+C 复制兜底，用后还原剪贴板（阻塞 ≤400ms，工作线程调用）。
-std::optional<std::wstring> ClipboardFallbackCopy();
+std::optional<std::wstring> ClipboardFallbackCopy(const std::function<bool()>& cancelled = [] { return false; });
+
+/// Fresh UIA/foreground proof. Must be called from a COM-initialized thread.
+bool VerifyReplacementTarget(const replacement::Snapshot& expected, bool afterSelectAll);
 
 /// 兜底锚点：光标位置一小块矩形
 RECT CursorAnchor();

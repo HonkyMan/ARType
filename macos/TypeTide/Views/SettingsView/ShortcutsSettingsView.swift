@@ -84,7 +84,7 @@ struct ShortcutsSettingsView: View {
         readStatus = TriggerController.shared.readShortcutStatus
         rewriteStatus = TriggerController.shared.rewriteShortcutStatus
         if readShortcut == nil && rewriteShortcut == nil {
-            validationMessage = "Set at least one shortcut so TypeTide can be triggered from the keyboard."
+            validationMessage = "Set at least one shortcut so ARType can be triggered from the keyboard."
         } else if !TriggerController.shared.shortcutsReady {
             validationMessage = "One or more shortcuts could not be registered. Choose a different combination."
         } else if validationMessage?.contains("could not be registered") == true

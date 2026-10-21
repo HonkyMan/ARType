@@ -9,6 +9,7 @@
 #include "TrayIcon.h"
 #include <optional>
 #include <string>
+#include <atomic>
 
 enum class ShortcutAction;
 
@@ -17,13 +18,13 @@ constexpr UINT WM_APP_TRAY = WM_APP + 1;
 constexpr UINT WM_APP_TR_DELTA = WM_APP + 2;    // wParam=reqId, lParam=std::wstring*（接收方释放）
 constexpr UINT WM_APP_TR_DONE = WM_APP + 3;     // wParam=reqId, lParam=DoneMsg*
 constexpr UINT WM_APP_REWRITE_DONE = WM_APP + 4;// lParam=RewriteResult*
-constexpr UINT WM_APP_UPDATE = WM_APP + 5;      // 有新版本
 constexpr UINT WM_APP_OPEN_SETTINGS = WM_APP + 6;
-constexpr UINT WM_APP_MODELS = WM_APP + 7;          // lParam=std::vector<std::wstring>*（接收方释放）
 constexpr UINT WM_APP_READ_CAPTURED = WM_APP + 8;   // lParam=capture::Capture*（可空；接收方释放）
 constexpr UINT WM_APP_REWRITE_CAPTURED = WM_APP + 9;// 同上
+constexpr UINT WM_APP_ACCOUNT_STATUS = WM_APP + 10;
+constexpr UINT WM_APP_REPLACEMENT_DONE = WM_APP + 11;
 
-constexpr wchar_t kAppWindowClass[] = L"TypeTideApp";
+constexpr wchar_t kAppWindowClass[] = L"ARTypeApp";
 
 class App {
 public:
@@ -37,6 +38,7 @@ public:
     /// 根据开关 + 快捷键 + 划词设置重新装配触发（设置变化后调用）
     void applyEnabledState();
     void openSettings();
+    void cancelTranslations();
 
 private:
     App() = default;
@@ -46,8 +48,10 @@ private:
     struct DoneMsg {
         bool ok;
         std::wstring error;
+        bool languageSettings = false;
     };
     struct RewriteResult {
+        uint64_t generation;
         bool ok;
         std::wstring text;    // 译文（ok 时）
         std::wstring error;
@@ -56,6 +60,16 @@ private:
         bool hasAnchor;
         std::wstring original;
         Language target;
+        std::optional<replacement::Snapshot> replacementTarget;
+        bool languageSettings = false;
+    };
+    struct ReplacementResult {
+        uint64_t generation;
+        replacement::Result result;
+        std::wstring translation;
+        std::wstring original;
+        Language language;
+        RECT anchor;
     };
     struct Direction {
         std::optional<Language> from;
@@ -73,12 +87,17 @@ private:
     void startStream(const std::wstring& text, std::optional<Language> from, Language to, RewriteStyle style);
     void setupSelectionTrigger();
     bool foregroundAppSkipped() const;
-    void showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error);
+    void showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error, bool languageSettings=false);
+    void replaceOrOfferCopy(std::wstring text, bool selectAll,
+                            std::optional<replacement::Snapshot> target,
+                            std::wstring original, Language language, RECT anchor);
     void quit();
 
     HWND hwnd_ = nullptr;
     TrayIcon tray_;
     uint64_t currentReq_ = 0;
+    std::atomic<uint64_t> contextGeneration_{0};
+    bool shuttingDown_ = false;
     std::optional<Language> currentSource_;   // 弹窗重定向语言时沿用
     std::wstring currentText_;
     RewriteStyle currentStyle_ = RewriteStyle::Faithful;

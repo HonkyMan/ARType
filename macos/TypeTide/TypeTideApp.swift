@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct TypeTideApp: App {
@@ -26,6 +27,15 @@ struct TypeTideApp: App {
 enum SettingsOpener {
     private static var windowController: NSWindowController?
 
+    static func section(for url: URL) -> PreferencesSection? {
+        url.absoluteString == "artype://settings/languages" ? .language : nil
+    }
+    static func open(_ url: URL) {
+        guard let section = section(for:url) else { return }
+        SettingsNavigation.shared.selection = section
+        open()
+        Task { await ManagedAccount.shared.refresh() }
+    }
     static func open() {
         NSApp.activate(ignoringOtherApps: true)
         if windowController == nil {
@@ -36,7 +46,7 @@ enum SettingsOpener {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "TypeTide Settings"
+            window.title = "ARType"
             window.contentViewController = host
             window.isReleasedWhenClosed = false
             window.setFrameAutosaveName("TypeTideSettingsWindow")
@@ -51,6 +61,12 @@ enum SettingsOpener {
         windowController?.showWindow(nil)
         windowController?.window?.makeKeyAndOrderFront(nil)
     }
+}
+
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    @Published var selection: PreferencesSection = .general
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -72,11 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startTideDemoIfRequested()
 #endif
 
-        // 若配置的 Ollama 模型未安装，自动挑一个已装模型（避免开箱即败）
+        ManagedAccount.shared.startAutomaticRefresh()
+        // Refresh the managed account before allowing product actions.
         Task { @MainActor in
-            if let model = await OllamaModelResolver.ensureValidDefault(), AppSettings.backend == .ollama {
-                await OllamaModelResolver.preload(model)
-            }
+            await ManagedAccount.shared.refresh()
+            if !ManagedAccount.shared.accessNotice.isEmpty {SettingsOpener.open()}
         }
 
         // 首次启动：打开设置窗口，让用户立刻看到界面并完成配置
@@ -88,12 +104,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        // 自动检查更新
-        Task { @MainActor in
-            if UpdateChecker.shared.shouldAutoCheck() {
-                UpdateChecker.shared.checkForUpdates(silent: true)
-            }
-        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { SettingsOpener.open(url) }
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in await ManagedAccount.shared.refresh() }
     }
 
     /// App 已在运行时被再次打开（Finder/启动台双击）：没有可见窗口就打开设置，
@@ -113,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             image.isTemplate = true
             button.image = image
             button.imageScaling = .scaleProportionallyDown
-            button.toolTip = "TypeTide"
+            button.toolTip = "ARType"
         }
         statusMenu.autoenablesItems = false
         statusMenu.delegate = self
@@ -125,15 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildStatusMenu() {
         statusMenu.removeAllItems()
 
-        if UpdateChecker.shared.hasNewVersion {
-            let update = NSMenuItem(title: "New update available", action: #selector(openUpdate), keyEquivalent: "")
-            update.target = self
-            update.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
-            statusMenu.addItem(update)
-            statusMenu.addItem(.separator())
-        }
-
-        let enabled = NSMenuItem(title: AppSettings.isEnabled ? "TypeTide is On" : "TypeTide is Off",
+        let enabled = NSMenuItem(title: AppSettings.isEnabled ? "ARType включён" : "ARType выключен",
                                  action: #selector(toggleEnabled), keyEquivalent: "")
         enabled.target = self
         enabled.state = AppSettings.isEnabled ? .on : .off
@@ -156,7 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         statusMenu.addItem(settings)
 
-        let quit = NSMenuItem(title: "Quit TypeTide", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Выйти из ARType", action: #selector(quitApp), keyEquivalent: "q")
         quit.keyEquivalentModifierMask = [.command]
         quit.target = self
         quit.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
@@ -169,7 +178,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildStatusMenu()
     }
 
-    @objc private func openUpdate() { UpdateChecker.shared.openReleasesPage() }
     @objc private func openSettings() { SettingsOpener.open() }
     @objc private func quitApp() { NSApp.terminate(nil) }
 

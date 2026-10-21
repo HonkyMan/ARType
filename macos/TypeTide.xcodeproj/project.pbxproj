@@ -6,11 +6,7 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		5A86A34F2E9415F300CA8E22 /* Ollama in Frameworks */ = {isa = PBXBuildFile; productRef = 5A86A34E2E9415F300CA8E22 /* Ollama */; };
-		8B0000010000000000000001 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 8B0000020000000000000001 /* MLXLLM */; };
-		8B0000010000000000000002 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 8B0000020000000000000002 /* MLXLMCommon */; };
-/* End PBXBuildFile section */
+
 
 /* Begin PBXFileReference section */
 		5ACBDEF62E8A12F400DD7984 /* TypeTide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TypeTide.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -53,9 +49,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5A86A34F2E9415F300CA8E22 /* Ollama in Frameworks */,
-				8B0000010000000000000002 /* MLXLMCommon in Frameworks */,
-				8B0000010000000000000001 /* MLXLLM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,9 +121,6 @@
 			);
 			name = TypeTide;
 			packageProductDependencies = (
-				5A86A34E2E9415F300CA8E22 /* Ollama */,
-				8B0000020000000000000002 /* MLXLMCommon */,
-				8B0000020000000000000001 /* MLXLLM */,
 			);
 			productName = TypeTide;
 			productReference = 5ACBDEF62E8A12F400DD7984 /* TypeTide.app */;
@@ -163,8 +153,6 @@
 			mainGroup = 5ACBDEED2E8A12F400DD7984;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8B0000030000000000000001 /* mlx-swift-lm */,
-				5A86A34D2E9415F300CA8E22 /* XCRemoteSwiftPackageReference "ollama-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5ACBDEF72E8A12F400DD7984 /* Products */;
@@ -203,10 +191,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		7A0000010000000000000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = YPV49M8592; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TypeTide.app/Contents/MacOS/TypeTide"; }; name = Debug; };
-		7A0000010000000000000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = YPV49M8592; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TypeTide.app/Contents/MacOS/TypeTide"; }; name = Release; };
-		7A0000010000000000000021 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = YPV49M8592; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide.e2etests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TypeTide.app/Contents/MacOS/TypeTide"; }; name = Debug; };
-		7A0000010000000000000022 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = YPV49M8592; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide.e2etests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TypeTide.app/Contents/MacOS/TypeTide"; }; name = Release; };
+		7A0000010000000000000019 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ARType.app/Contents/MacOS/ARType"; }; name = Debug; };
+		7A0000010000000000000020 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ARType.app/Contents/MacOS/ARType"; }; name = Release; };
+		7A0000010000000000000021 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop.e2etests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ARType.app/Contents/MacOS/ARType"; }; name = Debug; };
+		7A0000010000000000000022 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop.e2etests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ARType.app/Contents/MacOS/ARType"; }; name = Release; };
 		5ACBDEFF2E8A12F500DD7984 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -242,7 +230,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = YPV49M8592;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -306,7 +294,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = YPV49M8592;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -337,7 +325,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YPV49M8592;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
@@ -355,9 +343,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.18;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 0.1.22;
+				PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop;
+				PRODUCT_NAME = ARType;
+				PRODUCT_MODULE_NAME = TypeTide;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
 				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
@@ -384,7 +373,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YPV49M8592;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_PREVIEWS = YES;
@@ -402,9 +391,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.18;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xnu.typetide;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				MARKETING_VERSION = 0.1.22;
+				PRODUCT_BUNDLE_IDENTIFIER = com.artype.desktop;
+				PRODUCT_NAME = ARType;
+				PRODUCT_MODULE_NAME = TypeTide;
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
 				RUNTIME_EXCEPTION_ALLOW_JIT = NO;
@@ -451,27 +441,7 @@
 		7A0000010000000000000018 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 5ACBDEF52E8A12F400DD7984 /* TypeTide */; targetProxy = 7A0000010000000000000004 /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		5A86A34D2E9415F300CA8E22 /* XCRemoteSwiftPackageReference "ollama-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/mattt/ollama-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.8.0;
-			};
-		};
-		8B0000030000000000000001 /* mlx-swift-lm */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/ml-explore/mlx-swift-lm"; requirement = {kind = exactVersion; version = 2.30.6; }; };
-/* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCSwiftPackageProductDependency section */
-		5A86A34E2E9415F300CA8E22 /* Ollama */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 5A86A34D2E9415F300CA8E22 /* XCRemoteSwiftPackageReference "ollama-swift" */;
-			productName = Ollama;
-		};
-		8B0000020000000000000001 /* MLXLLM */ = {isa = XCSwiftPackageProductDependency; package = 8B0000030000000000000001; productName = MLXLLM; };
-		8B0000020000000000000002 /* MLXLMCommon */ = {isa = XCSwiftPackageProductDependency; package = 8B0000030000000000000001; productName = MLXLMCommon; };
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5ACBDEEE2E8A12F400DD7984 /* Project object */;
 }

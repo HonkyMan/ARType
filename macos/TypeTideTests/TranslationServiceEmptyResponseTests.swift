@@ -35,13 +35,18 @@ final class TranslationServiceEmptyResponseTests: XCTestCase {
         }
     }
 
-    func testHealthCheckRejectsEmptyProviderResponse() async {
+    func testReplacementRejectsEmptyProviderResponse() async {
         TranslationService.shared.providerOverride = EmptyTranslationProvider()
-
-        let result = await BackendHealthChecker.check()
-
-        XCTAssertFalse(result.isSuccess)
-        XCTAssertEqual(result.message, "Empty translation")
+        do {
+            _ = try await TranslationService.shared.translateFully(
+                text: "synthetic input", from: .english, to: .chinese
+            )
+            XCTFail("An empty response must never replace the selected text")
+        } catch let error as TranslationError {
+            XCTAssertEqual(error.category, "emptyResponse")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 }
 

@@ -36,7 +36,7 @@ struct DiagnosticsSettingsView: View {
 
             Section {
                 SettingsNote(
-                    text: "Stored only on this Mac. TypeTide never records selected text, translations, clipboard contents, app names, endpoint URLs, or credentials.",
+                    text: "Stored only on this Mac. ARType never records selected text, translations, clipboard contents, app names, endpoint URLs, or credentials.",
                     symbol: "lock.shield.fill",
                     tint: .green
                 )
@@ -62,7 +62,7 @@ struct DiagnosticsSettingsView: View {
             Section {
                 if events.isEmpty {
                     ContentUnavailableView("No diagnostics yet", systemImage: "waveform.path.ecg",
-                                           description: Text("Use TypeTide or run a backend test to create local events."))
+                                           description: Text("Use ARType or run a backend test to create local events."))
                 } else {
                     ForEach(events.suffix(12).reversed()) { event in
                         HStack {
@@ -89,7 +89,7 @@ struct DiagnosticsSettingsView: View {
             isPresented: $isExporting,
             document: exportDocument,
             contentType: .json,
-            defaultFilename: "TypeTide-Diagnostics"
+            defaultFilename: "ARType-Diagnostics"
         ) { _ in }
     }
 

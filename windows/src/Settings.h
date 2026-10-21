@@ -1,14 +1,12 @@
 //
 //  Settings.h — 全局设置（对应 macOS 的 AppSettings），
-//  JSON 持久化到 %APPDATA%\TypeTide\settings.json。
+//  JSON 持久化到 %APPDATA%\ARType\settings.json。
 //
 #pragma once
 #include <windows.h>
 #include "Language.h"
 #include <string>
 #include <vector>
-
-enum class TranslationBackend { BuiltIn, Ollama, OpenAI };
 
 /// 划词触发方式
 enum class SelectionTrigger {
@@ -38,20 +36,10 @@ struct Hotkey {
 
 struct Settings {
     bool enabled = true;
-    TranslationBackend backend = TranslationBackend::BuiltIn;
-
-    // Ollama
-    std::string ollamaHost = "http://127.0.0.1";
-    int ollamaPort = 11434;
-    std::string ollamaModel = "qwen2.5:3b";
-
-    // OpenAI 兼容
-    std::string openAIBaseURL = "https://api.openai.com/v1";
-    std::string openAIKey;
-    std::string openAIModel = "gpt-5-mini";
+    std::string tenantId;
 
     // 语言（native = 母语，foreign = 外语）
-    Language nativeLanguage = Language::Chinese;
+    Language nativeLanguage = Language::Russian;
     Language foreignLanguage = Language::English;
     TranslationDirection readDirection = TranslationDirection::Auto;
     TranslationDirection rewriteDirection = TranslationDirection::Auto;
@@ -72,7 +60,6 @@ struct Settings {
     std::vector<std::wstring> skipApps;
 
     bool hasCompletedFirstLaunch = false;
-    long long lastUpdateCheck = 0;  // Unix 秒
 
     // --- 持久化 ---
     static Settings& shared();

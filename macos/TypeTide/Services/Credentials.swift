@@ -2,14 +2,18 @@ import Foundation
 import Security
 
 enum Credentials {
-    private static let service = "com.xnu.typetide"
-    private static let cloudAPIKeyAccount = "cloud-api-key"
+    private static let service = "com.artype.desktop"
+    // Unscoped legacy tokens are deliberately not migrated: their authority is unknown.
+    private static var account: String? {
+        ManagedEndpoint.configuredOrigin.flatMap(ManagedEndpoint.credentialAccount)
+    }
 
-    static func cloudAPIKey() -> String {
+    static func sessionToken() -> String {
+        guard let account else { return "" }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: cloudAPIKeyAccount,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -20,11 +24,12 @@ enum Credentials {
     }
 
     @discardableResult
-    static func saveCloudAPIKey(_ value: String) -> Bool {
+    static func saveSessionToken(_ value: String) -> Bool {
+        guard let account else { return false }
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: cloudAPIKeyAccount
+            kSecAttrAccount as String: account
         ]
         if value.isEmpty {
             let status = SecItemDelete(base as CFDictionary)

@@ -4,7 +4,8 @@
     {"text": "The quick brown fox jumps over the lazy dog and it was great.", "expected": "en"},
     {"text": "Это очень интересная книга о русской истории.", "expected": "ru"},
     {"text": "مرحبا كيف حالك اليوم؟", "expected": "ar"},
-    {"text": "आप कैसे हैं? मुझे हिंदी बहुत पसंद है।", "expected": "hi"}
+    {"text": "आप कैसे हैं? मुझे हिंदी बहुत पसंद है।", "expected": "hi"},
+    {"text": "আজ আবহাওয়া খুব ভালো। আমরা সবাই একসাথে কাজ করছি।", "expected": "bn"}
   ],
   "directionCases": [
     {"text": "你好，今天怎么样？", "mode": "auto", "isWrite": false, "native": "zh", "foreign": "en", "source": "zh", "target": "en"},
@@ -12,7 +13,13 @@
     {"text": "12345 !!!", "mode": "auto", "isWrite": false, "native": "zh", "foreign": "en", "source": null, "target": "zh"},
     {"text": "12345 !!!", "mode": "auto", "isWrite": true, "native": "zh", "foreign": "en", "source": null, "target": "en"},
     {"text": "任意文本", "mode": "nativeToForeign", "isWrite": false, "native": "zh", "foreign": "fr", "source": "zh", "target": "fr"},
-    {"text": "anything", "mode": "foreignToNative", "isWrite": true, "native": "zh", "foreign": "es", "source": "es", "target": "zh"}
+    {"text": "anything", "mode": "foreignToNative", "isWrite": true, "native": "zh", "foreign": "es", "source": "es", "target": "zh"},
+    {"text": "আজ আবহাওয়া খুব ভালো। আমরা সবাই একসাথে কাজ করছি।", "mode": "auto", "isWrite": false, "native": "ru", "foreign": "bn", "source": "bn", "target": "ru"},
+    {"text": "Пожалуйста, переведите это сообщение для нашей команды.", "mode": "nativeToForeign", "isWrite": true, "native": "ru", "foreign": "bn", "source": "ru", "target": "bn"},
+    {"text": "आप कैसे हैं? मुझे हिंदी बहुत पसंद है।", "mode": "auto", "isWrite": false, "native": "ru", "foreign": "hi", "source": "hi", "target": "ru"},
+    {"text": "Пожалуйста, переведите это сообщение для нашей команды.", "mode": "nativeToForeign", "isWrite": true, "native": "ru", "foreign": "hi", "source": "ru", "target": "hi"},
+    {"text": "今天天气很好，我们出去散步吧。", "mode": "auto", "isWrite": false, "native": "ru", "foreign": "zh", "source": "zh", "target": "ru"},
+    {"text": "Пожалуйста, переведите это сообщение для нашей команды.", "mode": "nativeToForeign", "isWrite": true, "native": "ru", "foreign": "zh", "source": "ru", "target": "zh"}
   ],
   "lineAssembly": {
     "fragments": ["\ufeffdata: {\"choices\":[{\"del", "ta\":{\"content\":\"你\"}}]}\r\n", "data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n", "data: [DONE]"],

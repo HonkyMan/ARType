@@ -45,31 +45,6 @@ enum Language: String, CaseIterable, Identifiable {
         displayName.components(separatedBy: " (").first ?? displayName
     }
 
-    var promptName: String {
-        switch self {
-        case .english: return "English"
-        case .chinese: return "Chinese"
-        case .hindi: return "Hindi"
-        case .spanish: return "Spanish"
-        case .french: return "French"
-        case .arabic: return "Arabic"
-        case .bengali: return "Bengali"
-        case .russian: return "Russian"
-        case .portuguese: return "Portuguese"
-        case .indonesian: return "Indonesian"
-        }
-    }
-
-    /// 翻译提示词模板
-    func translationPrompt(for text: String, targetLanguage: Language) -> String {
-        return """
-        Translate the following \(displayName) text to \(targetLanguage.displayName). Only provide the translation, no explanation or additional text.
-
-        \(displayName): \(text)
-        \(targetLanguage.displayName):
-        """
-    }
-
     /// 用 NaturalLanguage 检测文本的主语言，映射到我们支持的 10 种之一。
     /// 文本为空、无法判断、或不在支持集合内时返回 nil（交由调用方走兜底方向）。
     static func detect(in text: String) -> Language? {
@@ -123,7 +98,7 @@ struct LanguageConfig {
                let language = Language(rawValue: savedLang) {
                 return language
             }
-            return .chinese // 默认为中文
+            return .russian
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "sourceLanguage")

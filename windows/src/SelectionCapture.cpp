@@ -13,20 +13,75 @@ namespace capture {
 
 namespace {
 
-IUIAutomation* uia() {
-    static ComPtr<IUIAutomation> instance = [] {
-        ComPtr<IUIAutomation> p;
-        CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&p));
-        return p;
-    }();
-    return instance.Get();
-}
-
 std::wstring fromBstr(BSTR b) {
     if (!b) return {};
     std::wstring s(b, SysStringLen(b));
     SysFreeString(b);
     return s;
+}
+
+std::optional<std::wstring> boundedText(IUIAutomationTextRange* range) {
+    BSTR raw = nullptr;
+    if (FAILED(range->GetText(20001, &raw))) return std::nullopt;
+    auto value = fromBstr(raw);
+    if (value.size() > 20000) return std::nullopt;
+    return value;
+}
+
+std::optional<replacement::Snapshot> targetSnapshot(IUIAutomationElement* focused) {
+    replacement::Snapshot snapshot;
+    HWND foreground = GetForegroundWindow();
+    DWORD foregroundPID = 0;
+    GetWindowThreadProcessId(foreground, &foregroundPID);
+    int elementPID = 0;
+    BOOL password = TRUE;
+    if (!foreground || !foregroundPID || FAILED(focused->get_CurrentProcessId(&elementPID)) ||
+        foregroundPID != static_cast<DWORD>(elementPID) ||
+        FAILED(focused->get_CurrentIsPassword(&password)) || password) return std::nullopt;
+    snapshot.window = reinterpret_cast<uintptr_t>(foreground);
+    snapshot.process = foregroundPID;
+
+    SAFEARRAY* runtime = nullptr;
+    if (FAILED(focused->GetRuntimeId(&runtime)) || !runtime) return std::nullopt;
+    LONG first = 0, last = -1;
+    const bool valid = SafeArrayGetDim(runtime) == 1 &&
+        SUCCEEDED(SafeArrayGetLBound(runtime, 1, &first)) &&
+        SUCCEEDED(SafeArrayGetUBound(runtime, 1, &last)) &&
+        last >= first && static_cast<int64_t>(last) - first < 128 &&
+        SafeArrayGetElemsize(runtime) == sizeof(int);
+    if (valid) {
+        for (int64_t offset = 0; offset <= static_cast<int64_t>(last) - first; ++offset) {
+            LONG index = static_cast<LONG>(static_cast<int64_t>(first) + offset);
+            int value = 0;
+            if (FAILED(SafeArrayGetElement(runtime, &index, &value))) { snapshot.element.clear(); break; }
+            snapshot.element.push_back(value);
+        }
+    }
+    SafeArrayDestroy(runtime);
+    if (snapshot.element.empty()) return std::nullopt;
+
+    ComPtr<IUIAutomationTextPattern> pattern;
+    ComPtr<IUIAutomationTextRange> document, selected, prefix;
+    ComPtr<IUIAutomationTextRangeArray> selection;
+    int count = 0;
+    if (FAILED(focused->GetCurrentPatternAs(UIA_TextPatternId, IID_PPV_ARGS(&pattern))) || !pattern ||
+        FAILED(pattern->get_DocumentRange(&document)) || !document ||
+        FAILED(pattern->GetSelection(&selection)) || !selection ||
+        FAILED(selection->get_Length(&count)) || count != 1 ||
+        FAILED(selection->GetElement(0, &selected)) || !selected ||
+        FAILED(document->Clone(&prefix)) || !prefix ||
+        FAILED(prefix->MoveEndpointByRange(TextPatternRangeEndpoint_End, selected.Get(), TextPatternRangeEndpoint_Start)))
+        return std::nullopt;
+    const auto whole = boundedText(document.Get()), before = boundedText(prefix.Get()), text = boundedText(selected.Get());
+    if (!whole || !before || !text || before->size() > whole->size() ||
+        text->size() > whole->size() - before->size() ||
+        whole->substr(0, before->size()) != *before ||
+        whole->substr(before->size(), text->size()) != *text) return std::nullopt;
+    snapshot.value = *whole;
+    snapshot.start = before->size();
+    snapshot.end = snapshot.start + text->size();
+    if (GetForegroundWindow() != foreground) return std::nullopt;
+    return snapshot;
 }
 
 /// 选区各行矩形的并集（SAFEARRAY of double: l,t,w,h ×N，屏幕物理像素）
@@ -87,6 +142,11 @@ std::optional<Capture> uiaSelection(IUIAutomationElement* focused) {
 
     Capture cap;
     cap.text = std::move(text);
+    cap.replacementTarget = targetSnapshot(focused);
+    if (cap.replacementTarget &&
+        cap.replacementTarget->value.substr(cap.replacementTarget->start,
+            cap.replacementTarget->end - cap.replacementTarget->start) != cap.text)
+        cap.replacementTarget.reset();
     cap.hasAnchor = unionBounds(range.Get(), &cap.anchor);
     return cap;
 }
@@ -117,7 +177,12 @@ std::optional<std::wstring> uiaWholeValue(IUIAutomationElement* focused) {
 
 ComPtr<IUIAutomationElement> focusedElement() {
     ComPtr<IUIAutomationElement> el;
-    if (IUIAutomation* a = uia()) a->GetFocusedElement(&el);
+    // Each caller stays in its own COM apartment; do not share raw UIA interfaces
+    // between the UI thread and the replacement worker.
+    ComPtr<IUIAutomation> automation;
+    if (SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&automation))) && automation)
+        automation->GetFocusedElement(&el);
     return el;
 }
 
@@ -164,34 +229,54 @@ std::optional<Capture> UIACaptureForRewrite() {
         Capture cap;
         cap.text = *value;
         cap.isWholeField = true;
+        cap.replacementTarget = targetSnapshot(el.Get());
+        if (cap.replacementTarget && cap.replacementTarget->value != cap.text) cap.replacementTarget.reset();
         cap.hasAnchor = elementRect(el.Get(), &cap.anchor);
         return cap;
     }
     return std::nullopt;
 }
 
-std::optional<std::wstring> ClipboardFallbackCopy() {
+std::optional<std::wstring> ClipboardFallbackCopy(const std::function<bool()>& cancelled) {
+    if (cancelled()) return std::nullopt;
     clipboard::Snapshot saved = clipboard::Take();
-    DWORD before = clipboard::SequenceNumber();
+    if (!saved.valid || cancelled() || clipboard::SequenceNumber() != saved.sequence) return std::nullopt;
+    const DWORD before = saved.sequence;
 
-    keyboard::SendCopy();
+    if (!keyboard::SendCopy()) return std::nullopt;
 
     std::optional<std::wstring> result;
+    DWORD copiedSequence = 0;
     // 最多等 ~400ms 让目标应用写入剪贴板
     int waited = 0;
     for (int i = 0; i < 20; ++i) {
         Sleep(20);
         waited += 20;
         if (clipboard::SequenceNumber() != before) {
-            result = clipboard::GetText();
+            const auto observed = clipboard::SequenceNumber();
+            auto text = clipboard::GetText();
+            if (clipboard::SequenceNumber() == observed) {
+                copiedSequence = observed;
+                result = std::move(text);
+            }
             break;
         }
+        if (cancelled()) break;
     }
     util::Log("ClipboardFallbackCopy seqChanged=%d waited=%dms got_len=%d",
               clipboard::SequenceNumber() != before, waited, result ? (int)result->size() : -1);
-    clipboard::Restore(saved);
+    // Only undo the copy observed by this operation, never a subsequent copy.
+    if (copiedSequence) clipboard::RestoreIfUnchanged(saved, copiedSequence);
+    if (cancelled()) return std::nullopt;
     if (result && util::Trim(*result).empty()) result.reset();
     return result;
+}
+
+bool VerifyReplacementTarget(const replacement::Snapshot& expected, bool afterSelectAll) {
+    auto focused = focusedElement();
+    if (!focused) return false;
+    auto current = targetSnapshot(focused.Get());
+    return current && replacement::Matches(expected, *current, afterSelectAll);
 }
 
 } // namespace capture

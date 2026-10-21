@@ -19,7 +19,8 @@ public:
     void appendDelta(const std::wstring& delta);
     /// 流结束：完成最后一次潮汐扫过；空结果由 App 转成错误。
     void finishTranslation();
-    void setError(const std::wstring& error);
+    void setError(const std::wstring& error, bool languageSettings=false);
+    void setReplacementNotice(const std::wstring& notice);
     void setTarget(Language target);
     /// 重新进入 loading（重定向语言后重新翻译）
     void resetForRetranslate();
@@ -64,6 +65,8 @@ private:
     std::wstring original_;
     std::wstring translation_;
     std::wstring error_;
+    bool languageSettings_ = false;
+    std::wstring replacementNotice_;
     bool loading_ = true;
     Language target_ = Language::English;
     bool copiedFlash_ = false;

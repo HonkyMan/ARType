@@ -4,7 +4,7 @@ import SwiftUI
 /// Platform-native controls keep their native appearance; these tokens align
 /// brand, spacing, status and custom chrome across the app.
 enum TypeTideTheme {
-    static let accent = Color(red: 0x7C / 255, green: 0x5C / 255, blue: 0xFF / 255)
+    static let accent = Color(red: 0x70 / 255, green: 0x45 / 255, blue: 0xFF / 255)
     static let accentSoft = accent.opacity(0.12)
 
     static let success = Color.green

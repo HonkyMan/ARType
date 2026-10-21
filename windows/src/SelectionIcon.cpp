@@ -6,7 +6,7 @@
 #include <algorithm>
 
 namespace {
-constexpr wchar_t kClassName[] = L"TypeTideSelectionIcon";
+constexpr wchar_t kClassName[] = L"ARTypeSelectionIcon";
 constexpr UINT_PTR kAutoHideTimer = 1;
 } // namespace
 

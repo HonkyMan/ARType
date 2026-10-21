@@ -1,5 +1,4 @@
 #include "Settings.h"
-#include "Credentials.h"
 #include "Json.h"
 #include "Util.h"
 #include <fstream>
@@ -67,35 +66,8 @@ void Settings::load() {
     };
 
     enabled = boolean("enabled", enabled);
-    const std::string backendCode = str("backend", "builtin");
-    backend = backendCode == "builtin" ? TranslationBackend::BuiltIn
-            : backendCode == "openai" ? TranslationBackend::OpenAI : TranslationBackend::Ollama;
-
-    ollamaHost = str("ollamaHost", ollamaHost);
-    ollamaPort = root["ollamaPort"].isNull() ? ollamaPort : root["ollamaPort"].asInt(ollamaPort);
-    if (ollamaPort < 1 || ollamaPort > 65535) ollamaPort = 11434;
-    ollamaModel = str("ollamaModel", ollamaModel);
-    if (ollamaHost.size() > 2048) ollamaHost = "http://127.0.0.1";
-    if (ollamaModel.size() > 256) ollamaModel = "qwen2.5:3b";
-
-    openAIBaseURL = str("openAIBaseURL", openAIBaseURL);
-    if (openAIBaseURL.size() > 2048) openAIBaseURL = "https://api.openai.com/v1";
-    const std::string legacyKey = str("openAIKey", "");
-    wchar_t testDir[2]{};
-    const bool isolatedTest = GetEnvironmentVariableW(L"TYPETIDE_DATA_DIR", testDir, 2) != 0;
-    bool migratedLegacyKey = false;
-    if (isolatedTest) {
-        openAIKey = legacyKey;
-    } else {
-        openAIKey = credentials::LoadCloudApiKey();
-        if (openAIKey.empty() && !legacyKey.empty()) {
-            openAIKey = legacyKey;
-            credentials::SaveCloudApiKey(openAIKey); // migrate old plaintext settings
-            migratedLegacyKey = true;
-        }
-    }
-    openAIModel = str("openAIModel", openAIModel);
-    if (openAIModel.size() > 256) openAIModel = "gpt-5-mini";
+    tenantId = str("tenantId", "");
+    // Legacy provider settings are ignored; the installer selects the managed origin.
 
     if (auto l = lang::FromCode(str("nativeLanguage", ""))) nativeLanguage = *l;
     if (auto l = lang::FromCode(str("foreignLanguage", ""))) foreignLanguage = *l;
@@ -150,30 +122,12 @@ void Settings::load() {
         }
 
     hasCompletedFirstLaunch = boolean("hasCompletedFirstLaunch", false);
-    lastUpdateCheck = (long long)root["lastUpdateCheck"].asNumber(0);
-    if (migratedLegacyKey) save(); // rewrite JSON without the plaintext key
 }
 
 bool Settings::save() const {
     json::Object root;
     root["enabled"] = enabled;
-    root["backend"] = backend == TranslationBackend::BuiltIn ? "builtin"
-                    : backend == TranslationBackend::OpenAI ? "openai" : "ollama";
-
-    root["ollamaHost"] = ollamaHost;
-    root["ollamaPort"] = ollamaPort;
-    root["ollamaModel"] = ollamaModel;
-
-    root["openAIBaseURL"] = openAIBaseURL;
-    wchar_t testDir[2]{};
-    const bool isolatedTest = GetEnvironmentVariableW(L"TYPETIDE_DATA_DIR", testDir, 2) != 0;
-    if (isolatedTest) root["openAIKey"] = openAIKey;
-    else if (!credentials::SaveCloudApiKey(openAIKey)) {
-        util::Log("settings: credential save failed (%lu)", GetLastError());
-        return false;
-    }
-    root["openAIModel"] = openAIModel;
-
+    root["tenantId"] = tenantId;
     root["nativeLanguage"] = lang::Code(nativeLanguage);
     root["foreignLanguage"] = lang::Code(foreignLanguage);
     root["readDirection"] = lang::DirectionCode(readDirection);
@@ -213,7 +167,6 @@ bool Settings::save() const {
     root["skipApps"] = json::Value(std::move(apps));
 
     root["hasCompletedFirstLaunch"] = hasCompletedFirstLaunch;
-    root["lastUpdateCheck"] = (double)lastUpdateCheck;
 
     // 原子写：先写临时文件再 rename 替换，进程中途被杀也不会留下半截 JSON
     std::wstring path = filePath();
