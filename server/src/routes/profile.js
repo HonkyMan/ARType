@@ -1,3 +1,4 @@
+import { effectiveLanguages } from '../language-policy.js';
 import { activateMemberships, operator } from '../access.js';
 import { transaction } from '../database.js';
 import { reconcileTenantBilling, productAccess } from '../billing.js';
@@ -22,7 +23,7 @@ export function installProfile(app, { pool, config }) {
       });
       tenants.push({
         id: tenant.id, name: tenant.name, plan: tenant.plan, renewal_enabled: tenant.renewal_enabled, role: tenant.role, status: tenant.status,
-        languages: tenant.languages, revision: tenant.revision, access_until: tenant.access_until,
+        languages: await effectiveLanguages(pool, tenant), revision: tenant.revision, access_until: tenant.access_until,
         ...entitlement,
       });
     }

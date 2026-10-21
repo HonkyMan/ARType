@@ -7,21 +7,28 @@
 
 import Foundation
 
-enum TranslationError: LocalizedError {
+enum TranslationError: LocalizedError, SettingsRecoveryError {
+    var recoveryURL: URL? {
+        if case .languageUnavailable = self {return URL(string:"artype://settings/languages")}
+        return nil
+    }
     case notConfigured(String)
     case network(String)
+    case languageUnavailable
     case empty
 
     var errorDescription: String? {
         switch self {
         case .notConfigured(let m): return m
         case .network(let m): return m
+        case .languageUnavailable: return "Выбранный язык отключён администратором. Откройте настройки языков и выберите доступную пару. Исходный текст сохранён."
         case .empty: return "Empty translation"
         }
     }
 
     var category: String {
         switch self {
+        case .languageUnavailable: return "languagePolicy"
         case .notConfigured: return "configuration"
         case .empty: return "emptyResponse"
         case .network(let message):

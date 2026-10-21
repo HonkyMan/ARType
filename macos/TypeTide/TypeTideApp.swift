@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct TypeTideApp: App {
@@ -26,6 +27,15 @@ struct TypeTideApp: App {
 enum SettingsOpener {
     private static var windowController: NSWindowController?
 
+    static func section(for url: URL) -> PreferencesSection? {
+        url.absoluteString == "artype://settings/languages" ? .language : nil
+    }
+    static func open(_ url: URL) {
+        guard let section = section(for:url) else { return }
+        SettingsNavigation.shared.selection = section
+        open()
+        Task { await ManagedAccount.shared.refresh() }
+    }
     static func open() {
         NSApp.activate(ignoringOtherApps: true)
         if windowController == nil {
@@ -53,6 +63,12 @@ enum SettingsOpener {
     }
 }
 
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    @Published var selection: PreferencesSection = .general
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let statusMenu = NSMenu()
@@ -72,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startTideDemoIfRequested()
 #endif
 
+        ManagedAccount.shared.startAutomaticRefresh()
         // Refresh the managed account before allowing product actions.
         Task { @MainActor in
             await ManagedAccount.shared.refresh()
@@ -87,6 +104,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { SettingsOpener.open(url) }
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in await ManagedAccount.shared.refresh() }
     }
 
     /// App 已在运行时被再次打开（Finder/启动台双击）：没有可见窗口就打开设置，

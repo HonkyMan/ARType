@@ -2,6 +2,25 @@ import XCTest
 @testable import TypeTide
 
 final class ManagedProtocolTests: XCTestCase {
+    @MainActor
+    func testLanguagePolicyKeepsUnavailableSelectionAndOffersOnlyTheTrustedSettingsLink() throws {
+        let policy = try JSONDecoder().decode(ManagedLanguagePolicy.self, from: Data(#"{"tenant_id":"P","languages":["ru","en","bn","hi","zh","es","fr","ar","pt","id"]}"#.utf8))
+        XCTAssertEqual(policy.available.count, 10)
+        XCTAssertTrue(policy.permits([.bengali, .hindi]))
+        let restricted = ManagedLanguagePolicy(tenant_id: "P", languages: ["ru","en","unknown"])
+        XCTAssertEqual(restricted.available, [.russian,.english])
+        XCTAssertFalse(restricted.permits([.russian,.bengali]))
+        let model = TranslationPopupModel(original:"Original",target:.bengali)
+        model.failTranslation(TranslationError.languageUnavailable)
+        XCTAssertEqual(model.targetLanguage,.bengali)
+        XCTAssertEqual(model.settingsLink?.absoluteString,"artype://settings/languages")
+        model.resetTranslation()
+        XCTAssertNil(model.settingsLink)
+        XCTAssertEqual(SettingsOpener.section(for: URL(string:"artype://settings/languages")!),.language)
+        XCTAssertNil(SettingsOpener.section(for: URL(string:"https://evil.test/settings/languages")!))
+        XCTAssertNil(SettingsOpener.section(for: URL(string:"artype://settings/languages?command=anything")!))
+    }
+
     func testUnpaidOrganizationCarriesStartupNoticeAndLegacyProfileStillDecodes() throws {
         let unpaid=Data(#"{"id":"tenant","name":"Team","status":"active","languages":["ru","en"],"can_translate":false,"access_message":"Balance is unpaid"}"#.utf8)
         let org=try JSONDecoder().decode(ManagedOrganization.self,from:unpaid)

@@ -10,7 +10,7 @@ import SwiftUI
 // MARK: - Main Settings Window
 
 struct SettingsView: View {
-    @State private var selection: PreferencesSection = .general
+    @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
         HSplitView {
@@ -19,7 +19,7 @@ struct SettingsView: View {
                     HStack { Image("BrandMark").resizable().aspectRatio(contentMode:.fit).frame(width:30,height:30); Text("ARType").font(.title2.bold()) }
                     Text("Рабочий язык вашей команды").font(.caption).foregroundStyle(.secondary)
                 }.padding(16)
-                List(PreferencesSection.allCases, selection: $selection) { section in
+                List(PreferencesSection.allCases, selection: $navigation.selection) { section in
                     Label {
                         Text(section.rawValue)
                     } icon: {
@@ -31,7 +31,7 @@ struct SettingsView: View {
             }
             .frame(minWidth: 180, idealWidth: 190, maxWidth: 220)
 
-                switch selection {
+                switch navigation.selection {
                 case .general:
                     ManagedAccountView()
                 case .behavior:

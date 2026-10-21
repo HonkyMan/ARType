@@ -34,7 +34,7 @@ export async function reserve(pool, user, body, config) {
       fail(422, 'text_too_long', {limit: tenant.max_text});
     }
     if (!tenant.languages.includes(body.target) || (body.source && !tenant.languages.includes(body.source))) {
-      fail(422, 'language_not_allowed');
+      fail(422, 'language_not_allowed', {settings_url:'artype://settings/languages'});
     }
     const provider = await resolveProvider(db, tenant, config);
     const duplicate = await db.query('SELECT id FROM usage WHERE user_id=$1 AND request_id=$2', [user.id, body.request_id]);

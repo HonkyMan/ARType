@@ -70,6 +70,9 @@ void background(HWND window, UINT message, unsigned context,
     }
 }
 }
+static std::vector<Language> allowedLanguages;
+const std::vector<Language>& AllowedLanguages(){return allowedLanguages;}
+void ApplyLanguages(const json::Value& policy){allowedLanguages=managed::AllowedLanguages(policy);}
 std::string ServiceURL(){return managed::ConfiguredOrigin();}
 std::string RequestId(){GUID id{};if(FAILED(CoCreateGuid(&id)))throw std::runtime_error("UUID unavailable");wchar_t b[40]{};StringFromGUID2(id,b,40);auto s=util::Narrow(b);return s.substr(1,36);}
 void Cancel(){++generation;pending.clear();}

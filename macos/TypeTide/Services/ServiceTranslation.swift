@@ -1,5 +1,7 @@
 import AppKit
 
+protocol SettingsRecoveryError: Error { var recoveryURL: URL? { get } }
+
 /// Services accepts an immutable input snapshot and presents its result separately.
 /// No asynchronous completion writes to the caller's pasteboard.
 @MainActor
@@ -22,13 +24,13 @@ enum ServiceTranslation {
     struct Work {
         let translate: (String) async throws -> String
         let showResult: (String) -> Void
-        let showError: (String) -> Void
+        let showError: (Error) -> Void
         let close: () -> Void
     }
 
     enum Outcome {
         case completed(String)
-        case failed
+        case failed(Error)
         case discarded
     }
 
@@ -56,11 +58,11 @@ enum ServiceTranslation {
         do {
             let result = try await translate(request.text)
             guard !Task.isCancelled, isCurrent() else { return .discarded }
-            guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failed }
+            guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failed(NSError(domain:"ARType",code:1,userInfo:[NSLocalizedDescriptionKey:"Empty translation"])) }
             return .completed(result)
         } catch {
             if error is CancellationError || Task.isCancelled || !isCurrent() { return .discarded }
-            return .failed
+            return .failed(error)
         }
     }
 }

@@ -17,7 +17,7 @@ struct TranslationRequest {
 namespace translator {
 
 using DeltaFn = std::function<void(uint64_t reqId, const std::wstring& delta)>;
-using DoneFn = std::function<void(uint64_t reqId, bool ok, const std::wstring& error)>;
+using DoneFn = std::function<void(uint64_t reqId, bool ok, const std::wstring& error, bool languageSettings)>;
 
 /// Start a managed request. Only a complete, validated result is emitted.
 uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone);

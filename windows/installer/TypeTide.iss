@@ -47,6 +47,10 @@ Name: "{group}\ARType"; Filename: "{app}\ARType.exe"
 Name: "{group}\Uninstall ARType"; Filename: "{uninstallexe}"
 
 [Registry]
+Root: HKCU; Subkey: "Software\Classes\artype"; ValueType: string; ValueName: ""; ValueData: "URL:ARType Settings"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\artype"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\artype\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\ARType.exe"" ""%1"""
+
 ; 开机自启（用户勾选时写入；卸载时清掉）
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     ValueType: string; ValueName: "ARType"; ValueData: """{app}\ARType.exe"""; \

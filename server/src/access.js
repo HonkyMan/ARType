@@ -1,3 +1,4 @@
+import { effectiveLanguages } from './language-policy.js';
 import { fail } from './errors.js';
 
 export function operator(user, config) {
@@ -31,7 +32,7 @@ export async function access(client, tenantId, user, config, { manage = false, l
   if (!isPlatformAdmin && (!membership || (manage && !['owner', 'admin'].includes(membership.role)))) {
     fail(403, 'no_access');
   }
-  return { ...tenant, role: isPlatformAdmin ? 'operator' : membership.role };
+  return { ...tenant, languages: await effectiveLanguages(client, tenant), role: isPlatformAdmin ? 'operator' : membership.role };
 }
 
 export function requirePlatformAdmin(user, config) {

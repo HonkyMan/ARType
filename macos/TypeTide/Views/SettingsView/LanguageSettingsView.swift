@@ -19,6 +19,7 @@ struct LanguageSettingsView: View {
         Form {
             Section {
                 Picker("Native language", selection: $selectedLanguage) {
+                    if !account.allowedLanguages.contains(selectedLanguage) { Text(selectedLanguage.displayName + " · недоступен").tag(selectedLanguage).disabled(true) }
                     ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
@@ -30,6 +31,7 @@ struct LanguageSettingsView: View {
                 }
 
                 Picker("Foreign language", selection: $selectedTargetLanguage) {
+                    if !account.allowedLanguages.contains(selectedTargetLanguage) { Text(selectedTargetLanguage.displayName + " · недоступен").tag(selectedTargetLanguage).disabled(true) }
                     ForEach(account.allowedLanguages) { language in
                         Text(language.displayName)
                             .tag(language)
@@ -40,6 +42,11 @@ struct LanguageSettingsView: View {
                     LanguageConfig.targetLanguage = newLanguage
                 }
 
+                if !account.allowedLanguages.contains(selectedLanguage) || !account.allowedLanguages.contains(selectedTargetLanguage) {
+                    Label("Выбранный язык отключён. Выберите доступные языки; прежняя пара сохранена до вашего изменения.", systemImage:"exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                Text("Список языков обновляется с сервера автоматически. Изменения администратора применяются без переустановки приложения.").font(.caption).foregroundStyle(.secondary)
                 if selectedLanguage == selectedTargetLanguage {
                     HStack(alignment: .top, spacing: 10) {
                         IconBadge(symbol: "exclamationmark.triangle.fill", color: .red, size: 20)
@@ -96,5 +103,6 @@ struct LanguageSettingsView: View {
 
         }
         .settingsPage("Language")
+        .task { await account.refresh() }
     }
 }

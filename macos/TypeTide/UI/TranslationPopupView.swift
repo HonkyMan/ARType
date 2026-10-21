@@ -23,6 +23,7 @@ final class TranslationPopupModel: ObservableObject {
     @Published var translation: String = ""
     @Published var isLoading: Bool = true
     @Published var errorText: String?
+    @Published var settingsLink: URL?
     @Published var replacementNotice: String?
     @Published private(set) var tidePhase: TidePhase = .waiting
     /// 当前目标语言（弹窗顶部可改选，触发 onRetarget 重新翻译）
@@ -49,6 +50,7 @@ final class TranslationPopupModel: ObservableObject {
         translation = ""
         isLoading = true
         errorText = nil
+        settingsLink = nil
         tidePhase = .waiting
     }
 
@@ -69,6 +71,11 @@ final class TranslationPopupModel: ObservableObject {
         if tidePhase == .settling { tidePhase = .complete }
     }
 
+    func failTranslation(_ error: Error) {
+        failTranslation(error.localizedDescription)
+        if case TranslationError.languageUnavailable = error { settingsLink = URL(string:"artype://settings/languages") }
+    }
+
     func failTranslation(_ message: String) {
         isLoading = false
         errorText = message
@@ -78,6 +85,7 @@ final class TranslationPopupModel: ObservableObject {
 
 struct TranslationPopupView: View {
     @ObservedObject var model: TranslationPopupModel
+    @ObservedObject private var account = ManagedAccount.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
 
@@ -129,7 +137,7 @@ struct TranslationPopupView: View {
     /// 目标语言下拉：即时把当前译文重定向到任意语言（含第三种语言）
     private var targetMenu: some View {
         Menu {
-            ForEach(Language.allCases) { lang in
+            ForEach(account.allowedLanguages) { lang in
                 Button {
                     guard lang != model.targetLanguage else { return }
                     model.onRetarget?(lang)
@@ -174,7 +182,12 @@ struct TranslationPopupView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(TypeTideTheme.warning)
                         .fixedSize(horizontal: false, vertical: true)
-                    if model.onRetry != nil {
+                    if let link = model.settingsLink {
+                        Button("Открыть настройки языков") {
+                            PopupController.shared.close()
+                            SettingsOpener.open(link)
+                        }.buttonStyle(.borderedProminent).controlSize(.small)
+                    } else if model.onRetry != nil {
                         HStack {
                             Spacer()
                             Button {

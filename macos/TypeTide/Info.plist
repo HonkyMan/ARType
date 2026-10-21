@@ -22,7 +22,9 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
-	<key>LSUIElement</key>
+	<key>CFBundleURLTypes</key>
+    <array><dict><key>CFBundleURLName</key><string>ARType Settings</string><key>CFBundleURLSchemes</key><array><string>artype</string></array></dict></array>
+    <key>LSUIElement</key>
 	<true/>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>ARType needs accessibility permission to read your selected text and replace it in place when you translate or rewrite.</string>

@@ -186,6 +186,15 @@ void testLocalDiagnosticsPrivacy() {
 }
 
 void testManagedProtocol() {
+    const auto policy=json::Parse(R"({"languages":["ru","en","bn","hi","zh","es","fr","ar","pt","id"]})");
+    check(managed::AllowedLanguages(policy).size()==10,"all configured languages are available");
+    check(managed::LanguagePermitted(policy,Language::Bengali),"enabled Bengali is allowed");
+    const auto restricted=json::Parse(R"({"languages":["ru","en","unknown"]})");
+    check(managed::AllowedLanguages(restricted).size()==2,"unknown codes do not create languages");
+    check(!managed::LanguagePermitted(restricted,Language::Bengali),"disabled selection must not translate");
+    check(managed::IsLanguageSettingsLink("artype://settings/languages"),"language deep link recognized");
+    check(!managed::IsLanguageSettingsLink("artype://settings/languages?command=bad"),"deep link rejects extra commands");
+
     printf("[managed protocol]\n");
     check(managed::OriginAllowed("https://translate.example.com") &&
           !managed::OriginAllowed("http://example.com") &&

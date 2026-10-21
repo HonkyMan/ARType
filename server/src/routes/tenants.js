@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requirePlatformAdmin } from '../access.js';
+import { access, requirePlatformAdmin } from '../access.js';
 import { settings, validate, uuid, email } from '../schemas.js';
 import { quoteMemberAccess, changeMemberAccess } from '../member-access.js';
 import { quoteInvitations, inviteMembers } from '../member-invitations.js';
@@ -30,6 +30,10 @@ const accessSelection = z.object({
 const csvCell = value => `"${String(value ?? '').replace(/^[=+@\-\t\r]/, "'$&").replaceAll('"', '""')}"`;
 
 export function installTenants(app, { pool, config }) {
+  app.get('/api/tenants/:id/language-policy', async (req,res) => {
+    const tenant = await access(pool, validate(uuid,req.params.id), req.user, config);
+    res.json({tenant_id:tenant.id, languages:tenant.languages});
+  });
   app.post('/api/tenants/:id/invitations/quote', async (req,res) => {
     res.json(await quoteInvitations(pool,config,req.user,validate(uuid,req.params.id),validate(invitations,req.body)));
   });

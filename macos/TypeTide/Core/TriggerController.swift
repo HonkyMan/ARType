@@ -231,7 +231,7 @@ final class TriggerController {
                     if !Task.isCancelled { model.finishTide() }
                 }
             } catch {
-                model.failTranslation((error as? TranslationError)?.errorDescription ?? error.localizedDescription)
+                model.failTranslation(error)
             }
         }
     }
@@ -302,7 +302,7 @@ final class TriggerController {
                     guard isCurrentRewrite(requestID) else { return }
                     let anchor = PopupPositioner.anchorRect(element: cap.element, range: cap.selectedRange)
                     let model = PopupController.shared.show(original: cap.text, target: dir.to, anchor: anchor, onReplace: nil)
-                    model.failTranslation((error as? TranslationError)?.errorDescription ?? error.localizedDescription)
+                    model.failTranslation(error)
                 }
             }
         }

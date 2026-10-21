@@ -51,7 +51,9 @@ final class SystemServiceProvider: NSObject {
             task = nil
             switch outcome {
             case .completed(let result): work.showResult(result)
-            case .failed: work.showError("Не удалось перевести текст. Повторите действие через меню Services.")
+            case .failed(let error):
+                if (error as? SettingsRecoveryError)?.recoveryURL?.absoluteString == "artype://settings/languages" {work.showError(error)}
+                else {work.showError(NSError(domain:"ARType",code:1,userInfo:[NSLocalizedDescriptionKey:"Не удалось перевести текст. Повторите действие через меню Services."]))}
             case .discarded: work.close()
             }
         }

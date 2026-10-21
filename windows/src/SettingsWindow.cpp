@@ -363,16 +363,23 @@ HWND makeLabel(const wchar_t* text, int x, int y, int w, int id, bool bold = fal
 
 void fillLanguageCombo(HWND combo, Language selected) {
     SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-    for (Language l : lang::All) {
+    const auto& allowed=account::AllowedLanguages();
+    for (Language l : allowed) {
         int idx = (int)SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)lang::DisplayName(l));
+        SendMessageW(combo,CB_SETITEMDATA,idx,static_cast<LPARAM>(l));
         if (l == selected) SendMessageW(combo, CB_SETCURSEL, idx, 0);
+    }
+    if(std::find(allowed.begin(),allowed.end(),selected)==allowed.end()){
+        const auto title=std::wstring(lang::DisplayName(selected))+L" · недоступен";
+        int idx=(int)SendMessageW(combo,CB_ADDSTRING,0,(LPARAM)title.c_str());
+        SendMessageW(combo,CB_SETITEMDATA,idx,static_cast<LPARAM>(selected));
+        SendMessageW(combo,CB_SETCURSEL,idx,0);
     }
 }
 
 Language comboLanguage(HWND combo) {
     int idx = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
-    if (idx < 0 || idx >= (int)std::size(lang::All)) return Language::English;
-    return lang::All[idx];
+    return static_cast<Language>(SendMessageW(combo,CB_GETITEMDATA,idx,0));
 }
 
 void fillDirectionCombo(HWND combo, TranslationDirection selected) {
@@ -725,7 +732,8 @@ void onCommand(int id, int code) {
         auto token=credentials::LoadSessionToken();
         if(!credentials::SaveSessionToken("")) {SetWindowTextW(ctrl(kAccountMessage),L"Не удалось удалить сессию из Credential Manager.");return;}
         account::Logout(g.hwnd,kMsgAccount,token);App::shared().cancelTranslations();
-        s.tenantId.clear();g.tenants.clear();
+        s.tenantId.clear();g.tenants.clear();account::ApplyLanguages(json::Value{});
+        fillLanguageCombo(ctrl(kNative),s.nativeLanguage);fillLanguageCombo(ctrl(kForeign),s.foreignLanguage);
         SendMessageW(ctrl(kAccountTenant),CB_RESETCONTENT,0,0);s.save();
         SetWindowTextW(ctrl(kAccountMessage),L"Вы вышли из ARType.");return;
     }
@@ -1116,8 +1124,14 @@ void applyAccountProfile(const json::Value& profile) {
         s.tenantId=g.tenants[selected];
     } else s.tenantId.clear();
     if(s.tenantId!=previousTenant)App::shared().cancelTranslations();
-    s.hasCompletedFirstLaunch=true;
-    s.save();
+    if(s.tenantId!=previousTenant||!s.hasCompletedFirstLaunch){s.hasCompletedFirstLaunch=true;s.save();}
+    const auto previousLanguages=account::AllowedLanguages();
+    json::Value policy;
+    if(tenants)for(const auto& t:*tenants)if(t["id"].asString()==s.tenantId)policy=t;
+    account::ApplyLanguages(policy);
+    if(previousLanguages!=account::AllowedLanguages()&&g.hwnd){
+        fillLanguageCombo(ctrl(kNative),s.nativeLanguage);fillLanguageCombo(ctrl(kForeign),s.foreignLanguage);
+    }
     std::wstring text=util::Widen(profile["user"]["email"].asString());
     const auto notice=managed::AccessNotice(profile,s.tenantId);
     text+=g.tenants.empty()?L"\nНет организаций. Попросите администратора пригласить этот email.":notice.empty()?L"\nВыберите рабочую организацию ниже.":L"\n"+util::Widen(notice);
@@ -1191,12 +1205,18 @@ void refreshShortcutStatus() {
     SetWindowTextW(ctrl(kHkStatus), status.c_str());
 }
 
-void open(HWND appWindow, bool showShortcuts) {
+void openLanguageSettings(HWND appWindow) {
+    open(appWindow,false,true);
+    if(const auto token=credentials::LoadSessionToken();!token.empty())account::FetchProfile(g.hwnd,kMsgAccount,token);
+}
+
+void open(HWND appWindow, bool showShortcuts, bool showLanguages) {
     if (g.hwnd) {
         refreshShortcutStatus();
-        if (showShortcuts) {
-            SendMessageW(ctrl(kTab), LB_SETCURSEL, 3, 0);
-            showPage(3);
+        if (showShortcuts || showLanguages) {
+            const int page=showLanguages?2:3;
+            SendMessageW(ctrl(kTab), LB_SETCURSEL, page, 0);
+            showPage(page);
         }
         ShowWindow(g.hwnd, SW_SHOWNORMAL);
         SetForegroundWindow(g.hwnd);
@@ -1276,7 +1296,7 @@ void open(HWND appWindow, bool showShortcuts) {
 
     buildPages();
     applyTheme(g.hwnd);
-    const int initialPage = showShortcuts ? 3 : 1;
+    const int initialPage = showLanguages ? 2 : showShortcuts ? 3 : 1;
     SendMessageW(ctrl(kTab), LB_SETCURSEL, initialPage, 0);
     showPage(initialPage);
     g.loading = false;

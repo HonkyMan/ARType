@@ -70,3 +70,15 @@ test('all principal views render in both languages and preserve escaped workspac
     for(const render of renders){render();assert.ok(html.length>100);assert.doesNotMatch(html,/<img src=x>/);assert.doesNotMatch(html,/undefined|NaN/);if(locale==='en')assert.doesNotMatch(html.replaceAll('Русский',''),/[А-Яа-яЁё]/);}
   }
 });
+
+test('Plus-only home shows the existing subscription separately from an empty Business list',()=>{
+  for(const locale of ['en','ru']){
+    setLocale(locale,storage);const state=createState();let html='';
+    state.me={operator:false,user:{name:'Owner',email:'owner@example.com'},tenants:[{id:'P',plan:'plus',role:'owner',can_translate:true,paid_until:'2026-11-01T00:00:00Z'}]};state.organizations=[];
+    createTenantViews({state,shell:content=>html=content}).home();
+    assert.match(html,/data-personal-summary/);assert.match(html,/data-action="personal"/);
+    assert.match(html,/Business/);assert.doesNotMatch(html,/No workspaces yet|Рабочих пространств пока нет/);
+    let onboarding='';createWorkspaceViews({state,shell:content=>onboarding=content}).onboarding({plans:[{plan:'plus',price_cents:500,registration_enabled:true},{plan:'business',price_cents:1000,seat_price_cents:500,registration_enabled:true}]});
+    assert.doesNotMatch(onboarding,/name="plan" value="plus"/);assert.match(onboarding,/data-personal-summary/);
+  }
+});

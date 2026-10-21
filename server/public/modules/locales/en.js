@@ -1,4 +1,17 @@
 export default {
+  "subscription_exists": "Already created",
+  "personal_separate_from_business": "Your personal subscription. Business organizations below are for teamwork.",
+  "manage_personal_subscription": "Manage subscription",
+  "personal_ready_to_use": "Your subscription is paid. Sign in to the app with this Google account to start translating.",
+  "personal_check_access": "Open your subscription to check payment and app access.",
+  "business_optional_for_personal": "Plus is enough for personal use. Create a Business organization only if you need to invite a team.",
+  "business_organizations": "Business organizations",
+  "no_business_organizations": "No Business organizations yet",
+  "choose_plan": "Choose a plan",
+  "plus_live_languages": "Languages are shared by all Plus subscriptions. Changes apply to existing and new subscribers and sync to their apps automatically.",
+  "plus_defaults_scope": "Languages apply to every Plus subscription. AI connection and limits are defaults for new subscriptions; existing subscriptions retain those settings.",
+  "error_plus_languages_managed": "Plus languages are managed centrally in Pricing and registration.",
+
   "found": "Found:",
   "of": "of",
   "you_have_unsaved_changes": "You have unsaved changes",

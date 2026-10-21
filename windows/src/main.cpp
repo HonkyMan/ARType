@@ -4,6 +4,8 @@
 //
 #include <windows.h>
 #include "App.h"
+#include "ManagedProtocol.h"
+#include "Util.h"
 #include "CrashDump.h"
 #include "SelfTest.h"
 #include "WorkerPool.h"
@@ -38,9 +40,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
 
     int argumentCount = 0;
     LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
-    bool selfTest = false, liveTest = false;
+    bool selfTest = false, liveTest = false, languagesLink = false;
     for (int i = 1; arguments && i < argumentCount; ++i) {
         const std::wstring argument = arguments[i];
+        if (managed::IsLanguageSettingsLink(util::Narrow(argument))) languagesLink=true;
         if (argument == L"--selftest") selfTest = true;
         if (argument == L"--selftest-translate") { selfTest = true; liveTest = true; }
     }
@@ -52,13 +55,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     struct Mutex { HANDLE handle; ~Mutex() { if (handle) CloseHandle(handle); } } mutexLifetime{mutex};
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND existing = FindWindowW(kAppWindowClass, nullptr))
-            PostMessageW(existing, WM_APP_OPEN_SETTINGS, 0, 0);
+            PostMessageW(existing, WM_APP_OPEN_SETTINGS, languagesLink?1:0, 0);
         return 0;
     }
 
     workers::Shared();
     if (!App::shared().init(inst)) { workers::Shared().stop(); return 1; }
 
+    if(languagesLink)PostMessageW(App::shared().hwnd(),WM_APP_OPEN_SETTINGS,1,0);
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);

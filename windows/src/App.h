@@ -48,6 +48,7 @@ private:
     struct DoneMsg {
         bool ok;
         std::wstring error;
+        bool languageSettings = false;
     };
     struct RewriteResult {
         uint64_t generation;
@@ -60,6 +61,7 @@ private:
         std::wstring original;
         Language target;
         std::optional<replacement::Snapshot> replacementTarget;
+        bool languageSettings = false;
     };
     struct ReplacementResult {
         uint64_t generation;
@@ -85,7 +87,7 @@ private:
     void startStream(const std::wstring& text, std::optional<Language> from, Language to, RewriteStyle style);
     void setupSelectionTrigger();
     bool foregroundAppSkipped() const;
-    void showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error);
+    void showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error, bool languageSettings=false);
     void replaceOrOfferCopy(std::wstring text, bool selectAll,
                             std::optional<replacement::Snapshot> target,
                             std::wstring original, Language language, RECT anchor);

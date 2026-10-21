@@ -804,3 +804,26 @@ test('bulk invitation authorization, validation, stale prices and capacity canno
   const results=await Promise.all([confirmInvitations(owner,t.id,body,q),confirmInvitations(owner,t.id,other,otherQuote)]);
   assert.deepEqual(results.map(r=>r.status).sort(),[201,409]);
 });
+
+test('Plus languages are a live plan policy for existing subscribers and device requests; Business stays independent',async()=>{
+  const op=await actor('operator@example.com'),owner=await actor('policy@example.com'),stranger=await actor('stranger@example.com');
+  await enablePlans(op);const plus=await selfWorkspace(owner),business=await selfWorkspace(owner,'business');
+  await call(`/api/tenants/${plus.id}/balance`,{actor:op,method:'POST',body:{operation:'credit',amount_cents:500,reason:'Activate Plus',idempotency_key:randomUUID()}});
+  const policy={...planDefaults,seats:1,languages:['en','ru','bn','hi','zh','es','fr','ar','pt','id']};
+  assert.equal((await call('/api/plan-defaults/plus',{actor:op,method:'PUT',body:policy})).status,200);
+  let profile=(await call('/api/me',{actor:owner})).data;
+  assert.deepEqual(profile.tenants.find(t=>t.id===plus.id).languages,policy.languages);
+  assert.deepEqual(profile.tenants.find(t=>t.id===business.id).languages,['en','ru']);
+  assert.deepEqual((await call(`/api/tenants/${plus.id}`,{actor:owner})).data.tenant.languages,policy.languages);
+  const endpoint=`/api/tenants/${plus.id}/language-policy`;
+  assert.equal((await call(endpoint,{actor:stranger})).status,403);
+  assert.deepEqual((await call(endpoint,{actor:owner})).data,{tenant_id:plus.id,languages:policy.languages});
+  const request=target=>call('/api/translate',{actor:owner,method:'POST',body:{tenant_id:plus.id,request_id:randomUUID(),text:'Hello',source:'en',target}});
+  assert.equal((await request('bn')).status,200);
+  assert.equal((await call('/api/plan-defaults/plus',{actor:op,method:'PUT',body:{...policy,languages:['en','ru']}})).status,200);
+  const before=upstreamCalls.length,denied=await request('bn');
+  assert.equal(denied.status,422);assert.equal(denied.data.error.code,'language_not_allowed');
+  assert.equal(denied.data.error.params.settings_url,'artype://settings/languages');assert.equal(upstreamCalls.length,before);
+  assert.deepEqual((await call(endpoint,{actor:owner})).data.languages,['en','ru']);
+  assert.equal((await call(`/api/tenants/${plus.id}`,{actor:op,method:'PATCH',body:{languages:['en','fr']}})).status,409);
+});

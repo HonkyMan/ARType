@@ -36,8 +36,9 @@ enum ManagedAPI {
         let status=(response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status) else {
             let b=try? JSONSerialization.jsonObject(with:data) as? [String:Any]
-            let e=b?["error"] as? [String:String]
-            throw TranslationError.network(e?["message"] ?? "Сервис ARType недоступен (\(status)).")
+            let e=b?["error"] as? [String:Any]
+            if e?["code"] as? String == "language_not_allowed" { throw TranslationError.languageUnavailable }
+            throw TranslationError.network(e?["message"] as? String ?? "Сервис ARType недоступен (\(status)).")
         }
         return (data,status)
     }
@@ -46,11 +47,18 @@ enum ManagedAPI {
     }
 }
 
+struct ManagedLanguagePolicy: Decodable {
+    let tenant_id: String
+    var languages: [String]
+    var available: [Language] { languages.compactMap(Language.init(rawValue:)) }
+    func permits(_ selected: [Language]) -> Bool { selected.allSatisfy { available.contains($0) } }
+}
+
 struct ManagedOrganization: Decodable, Identifiable {
     let id: String
     let name: String
     let status: String
-    let languages: [String]
+    var languages: [String]
     let can_translate: Bool?
     let access_message: String?
     var blockedMessage: String? {
@@ -74,30 +82,43 @@ final class ManagedAccount: ObservableObject {
             translationContextID = UUID()
             TriggerController.shared.cancelTranslations()
             UserDefaults.standard.set(selected,forKey:"artype.organization")
-            alignLanguages()
             updateAccessNotice()
         }
     }
     private var loginTask: Task<Void,Never>?
+    private var syncTask: Task<Void,Never>?
+    private var refreshing = false
     private(set) var translationContextID = UUID()
     fileprivate var generation=UUID()
     var token: String { Credentials.sessionToken() }
     var signedIn: Bool { !token.isEmpty }
     var allowedLanguages:[Language] {
-        organizations.first(where:{$0.id==selected})?.languages.compactMap(Language.init(rawValue:)) ?? [.russian,.english]
+        organizations.first(where:{$0.id==selected})?.languages.compactMap(Language.init(rawValue:)) ?? []
     }
     private init() {}
     private func updateAccessNotice() {
         let notice=organizations.first(where:{$0.id==selected})?.blockedMessage ?? ""
         if notice != accessNotice {accessNotice=notice;showAccessNotice = !notice.isEmpty}
     }
-    private func alignLanguages() {
-        guard !allowedLanguages.isEmpty else { return }
-        if !allowedLanguages.contains(LanguageConfig.sourceLanguage) {LanguageConfig.sourceLanguage=allowedLanguages[0]}
-        if !allowedLanguages.contains(LanguageConfig.targetLanguage) {LanguageConfig.targetLanguage=allowedLanguages.last!}
+    func startAutomaticRefresh() {
+        guard syncTask == nil else { return }
+        syncTask = Task { @MainActor in
+            while !Task.isCancelled {
+                await refresh()
+                do { try await Task.sleep(for:.seconds(30)) } catch { return }
+            }
+        }
+    }
+    func applyLanguagePolicy(_ policy: ManagedLanguagePolicy) {
+        guard policy.tenant_id == selected,
+              let index = organizations.firstIndex(where: {$0.id == policy.tenant_id}) else { return }
+        organizations[index].languages = policy.languages
+        // Preserve the user's pair: an unavailable choice requires an explicit correction.
     }
     func refresh() async {
-        guard signedIn else { return }
+        guard signedIn, !refreshing else { return }
+        refreshing=true
+        defer { refreshing=false }
         let current=generation
         do {
             struct Profile:Decodable {struct User:Decodable{let email:String};let user:User;let tenants:[ManagedOrganization]}
@@ -107,7 +128,6 @@ final class ManagedAccount: ObservableObject {
             email=p.user.email;organizations=p.tenants;message=""
             UserDefaults.standard.set(true,forKey:AppSettings.Keys.hasCompletedFirstLaunch)
             if !organizations.contains(where:{$0.id==selected}) {selected=organizations.first?.id ?? ""}
-            alignLanguages()
             updateAccessNotice()
         }catch { if generation==current {message=error.localizedDescription} }
     }
@@ -165,12 +185,19 @@ struct ManagedTranslationProvider: TranslationProvider {
     let token:String
     let tenant:String
     let generation:UUID
-    @MainActor init(){token=ManagedAccount.shared.token;tenant=ManagedAccount.shared.selected;generation=ManagedAccount.shared.generation}
+    let selectedLanguages:[Language]
+    @MainActor init(){token=ManagedAccount.shared.token;tenant=ManagedAccount.shared.selected;generation=ManagedAccount.shared.generation;selectedLanguages=[LanguageConfig.sourceLanguage,LanguageConfig.targetLanguage]}
     func stream(_ request: TranslationRequest) -> AsyncThrowingStream<String,Error> {
         AsyncThrowingStream { continuation in
             let task=Task {
                 do {
                     guard !token.isEmpty,!tenant.isEmpty else {throw TranslationError.notConfigured("Войдите в ARType и выберите организацию в настройках.")}
+                    let (policyData,_) = try await ManagedAPI.json("api/tenants/\(tenant)/language-policy",token:token)
+                    let policy = try JSONDecoder().decode(ManagedLanguagePolicy.self,from:policyData)
+                    guard policy.tenant_id == tenant else {throw TranslationError.network("Неверная политика языков сервера.")}
+                    guard ManagedAccount.shared.generation==generation, ManagedAccount.shared.selected==tenant else {throw CancellationError()}
+                    ManagedAccount.shared.applyLanguagePolicy(policy)
+                    guard policy.permits(selectedLanguages + [request.target] + (request.source.map {[$0]} ?? [])) else {throw TranslationError.languageUnavailable}
                     let body=try ManagedProtocol.body(request,tenant:tenant)
                     let (data,_)=try await ManagedAPI.request("api/translate",method:"POST",body:body,token:token)
                     try Task.checkCancellation()

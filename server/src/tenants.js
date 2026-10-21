@@ -85,6 +85,7 @@ export async function updateTenant(pool, config, user, id, changes) {
   await transaction(pool, async db => {
     const tenant = await access(db, id, user, config, { manage: true, lock: true });
     if (tenant.plan === 'plus' && tenant.role !== 'operator' && Object.keys(changes).some(key => key !== 'name')) fail(403, 'business_required');
+    if (tenant.plan === 'plus' && changes.languages) fail(409, 'plus_languages_managed');
     const entries = Object.entries(changes);
     if (!entries.length) fail(422, 'empty_update');
     if (tenant.role !== 'operator' && entries.some(([key]) => !['name', 'instructions', 'languages'].includes(key))) {

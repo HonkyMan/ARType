@@ -25,7 +25,7 @@ struct ServiceTranslationTests {
             cancel = onDismiss
             return .init(translate: { _ in
                 try await withCheckedThrowingContinuation { pending = $0 }
-            }, showResult: { results.append($0) }, showError: { failures.append($0) }, close: { closed += 1 })
+            }, showResult: { results.append($0) }, showError: { failures.append($0.localizedDescription) }, close: { closed += 1 })
         })
         func put(_ text: String) { board.clearContents(); board.setString(text, forType: .string) }
         func invoke() -> String {

@@ -24,9 +24,11 @@ struct ManagedContext {
     std::string serviceURL;
     std::string token;
     std::string tenantId;
+    Language nativeLanguage;
+    Language foreignLanguage;
 
     static ManagedContext snapshot() {
-        return {account::ServiceURL(), credentials::LoadSessionToken(), Settings::shared().tenantId};
+        return {account::ServiceURL(), credentials::LoadSessionToken(), Settings::shared().tenantId,Settings::shared().nativeLanguage,Settings::shared().foreignLanguage};
     }
 };
 
@@ -49,6 +51,7 @@ void finishRequest(uint64_t id) {
 
 struct StreamOutcome {
     bool ok = false;
+    bool languageSettings = false;
     std::wstring error;
     std::wstring full;
 };
@@ -73,11 +76,22 @@ StreamOutcome runManaged(const TranslationRequest& req, const ManagedContext& s,
     StreamOutcome out;
     if(!managed::OriginAllowed(s.serviceURL)) {out.error=L"Адрес сервиса ARType не настроен.";return out;}
     if(s.token.empty() || s.tenantId.empty()) {out.error=L"Войдите в ARType и выберите организацию в настройках.";return out;}
+    const auto policyResponse=http::Get(util::Widen(s.serviceURL+"/api/tenants/"+s.tenantId+"/language-policy"),
+        L"Authorization: Bearer "+util::Widen(s.token)+L"\r\n",&cancel);
+    if(!policyResponse.ok){out.error=providerError(policyResponse);return out;}
+    bool parsedPolicy=false;
+    const auto policy=json::Parse(policyResponse.body,&parsedPolicy);
+    if(!parsedPolicy||policy["tenant_id"].asString()!=s.tenantId){out.error=L"Неверная политика языков сервера.";return out;}
+    if(!managed::LanguagePermitted(policy,s.nativeLanguage)||!managed::LanguagePermitted(policy,s.foreignLanguage)||
+       !managed::LanguagePermitted(policy,req.target)||(req.source&&!managed::LanguagePermitted(policy,*req.source))){
+        out.error=L"Выбранный язык отключён администратором. Откройте настройки языков и выберите доступную пару. Исходный текст сохранён.";
+        out.languageSettings=true;return out;
+    }
     const auto body=managed::Request(util::Narrow(req.text),req.source?lang::Code(*req.source):"",
         lang::Code(req.target),lang::StyleCode(req.style),s.tenantId,account::RequestId());
     const auto result=http::Post(util::Widen(s.serviceURL+"/api/translate"),body.dump(),
         L"Authorization: Bearer "+util::Widen(s.token)+L"\r\n",&cancel);
-    if(!result.ok){out.error=providerError(result);return out;}
+    if(!result.ok){out.error=providerError(result);bool valid=false;const auto error=json::Parse(result.body,&valid);out.languageSettings=valid&&error["error"]["code"].asString()=="language_not_allowed";return out;}
     try {
         out.full=util::Widen(managed::Translation(result.body));
     } catch (const std::runtime_error&) {
@@ -107,7 +121,7 @@ uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone) {
     auto lifetime = std::shared_ptr<uint64_t>(new uint64_t(id),
         [](uint64_t* value) { finishRequest(*value); delete value; });
     const auto failed = [id, cancel, onDone](std::exception_ptr) {
-        if (!cancel->load()) onDone(id, false, L"Не удалось завершить фоновую операцию.");
+        if (!cancel->load()) onDone(id, false, L"Не удалось завершить фоновую операцию.",false);
         diagnostics::Record("translation", "failure", "artype", {}, "worker");
     };
     const auto rejected = onDone;
@@ -136,19 +150,19 @@ uint64_t Stream(const TranslationRequest& req, DeltaFn onDelta, DoneFn onDone) {
         const std::wstring cleaned = util::Trim(out.full);
         if (out.ok && !cleaned.empty()) {
 
-            onDone(id, true, L"");
+            onDone(id, true, L"",false);
             diagnostics::Record("translation", "success", backend, {}, {},
                                 firstMs, totalMs, (int)req.text.size());
         } else {
             const bool emptyResponse = out.ok && cleaned.empty();
             const std::wstring error = emptyResponse ? L"Empty translation" : out.error;
-            onDone(id, false, error);
+            onDone(id, false, error,out.languageSettings);
             diagnostics::Record("translation", "failure", backend, {},
                                 emptyResponse ? "emptyResponse" : "provider",
                                 firstMs, totalMs, (int)req.text.size());
         }
     }, failed);
-    if (!accepted) rejected(id, false, L"Фоновые операции заняты или приложение завершает работу.");
+    if (!accepted) rejected(id, false, L"Фоновые операции заняты или приложение завершает работу.",false);
 
     return id;
 }

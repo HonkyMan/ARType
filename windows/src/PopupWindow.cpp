@@ -1,3 +1,6 @@
+#include "SettingsWindow.h"
+#include "ManagedAccount.h"
+#include "App.h"
 #include "PopupWindow.h"
 #include "BrandMark.h"
 #include "Clipboard.h"
@@ -47,6 +50,7 @@ void PopupWindow::show(const std::wstring& original, Language target, RECT ancho
     original_ = original;
     translation_.clear();
     error_.clear();
+    languageSettings_=false;
     replacementNotice_.clear();
     loading_ = true;
     copiedFlash_ = false;
@@ -131,9 +135,10 @@ void PopupWindow::finishTranslation() {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void PopupWindow::setError(const std::wstring& error) {
+void PopupWindow::setError(const std::wstring& error, bool languageSettings) {
     if (!hwnd_) return;
     error_ = error;
+    languageSettings_ = languageSettings;
     loading_ = false;
     tidePhase_ = TidePhase::Failed;
     KillTimer(hwnd_, kTideTimer);
@@ -155,6 +160,7 @@ void PopupWindow::resetForRetranslate() {
     if (!hwnd_) return;
     translation_.clear();
     error_.clear();
+    languageSettings_=false;
     replacementNotice_.clear();
     loading_ = true;
     tidePhase_ = TidePhase::Waiting;
@@ -221,7 +227,7 @@ void PopupWindow::layoutAndResize() {
     scrollY_ = std::clamp(scrollY_, 0, std::max(0, textHeight_ - viewportHeight_));
 
     bool hasButtons = (!translation_.empty() && error_.empty()) ||
-                      (!error_.empty() && static_cast<bool>(onRetry));
+                      (!error_.empty() && (static_cast<bool>(onRetry)||languageSettings_));
     const int btnH = px(32);
     const int btnGap = px(ui::spacing::Medium);
 
@@ -237,9 +243,9 @@ void PopupWindow::layoutAndResize() {
     int btnY = height - padY - btnH;
     int replaceW = showReplace_ ? px(84) : 0;
     int copyW = px(70);
-    if (!error_.empty() && onRetry) {
+    if (!error_.empty() && (onRetry||languageSettings_)) {
         rcCopy_ = rcReplace_ = RECT{};
-        rcRetry_ = {width - padX - px(76), btnY, width - padX, btnY + btnH};
+        rcRetry_ = {width - padX - px(languageSettings_?230:76), btnY, width - padX, btnY + btnH};
     } else if (hasButtons) {
         rcRetry_ = {};
         int x = width - padX;
@@ -454,8 +460,8 @@ void PopupWindow::paint(HDC dc) {
         drawButton(rcCopy_, copiedFlash_ ? L"Copied ✓" : L"Copy", false, hover_ == Region::Copy);
         if (showReplace_) drawButton(rcReplace_, L"Replace", true, hover_ == Region::Replace);
     }
-    if (!error_.empty() && onRetry)
-        drawButton(rcRetry_, L"Retry", true, hover_ == Region::Retry);
+    if (!error_.empty() && (onRetry||languageSettings_))
+        drawButton(rcRetry_, languageSettings_?L"Открыть настройки языков":L"Retry", true, hover_ == Region::Retry);
 }
 
 PopupWindow::Region PopupWindow::hitTest(POINT pt) const {
@@ -469,10 +475,11 @@ PopupWindow::Region PopupWindow::hitTest(POINT pt) const {
 
 void PopupWindow::showLangMenu() {
     HMENU menu = CreatePopupMenu();
-    for (size_t i = 0; i < std::size(lang::All); ++i) {
+    const auto languages=account::AllowedLanguages();
+    for (size_t i = 0; i < languages.size(); ++i) {
         UINT flags = MF_STRING;
-        if (lang::All[i] == target_) flags |= MF_CHECKED;
-        AppendMenuW(menu, flags, 100 + i, lang::DisplayName(lang::All[i]));
+        if (languages[i] == target_) flags |= MF_CHECKED;
+        AppendMenuW(menu, flags, 100 + i, lang::DisplayName(languages[i]));
     }
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
@@ -489,8 +496,8 @@ void PopupWindow::showLangMenu() {
     DestroyMenu(menu);
     if (prevFg && prevFg != hwnd_) SetForegroundWindow(prevFg);
 
-    if (cmd >= 100 && cmd < 100 + std::size(lang::All)) {
-        Language chosen = lang::All[cmd - 100];
+    if (cmd >= 100 && cmd < 100 + languages.size()) {
+        Language chosen = languages[cmd - 100];
         if (chosen != target_ && onRetarget) onRetarget(chosen);
     }
 }
@@ -585,7 +592,8 @@ LRESULT PopupWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             SetCapture(hwnd_);
             return 0;
         case Region::Retry:
-            if (onRetry) onRetry();
+            if (languageSettings_) {close();SettingsWindow::openLanguageSettings(App::shared().hwnd());}
+            else if (onRetry) onRetry();
             return 0;
         default:
             return 0;

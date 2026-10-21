@@ -24,6 +24,7 @@ constexpr int kRewriteHotkeyId = 2;
 // 超过这个长度不翻译：LLM 又慢又贵，弹窗也展示不下
 constexpr size_t kMaxInputChars = 5000;
 constexpr UINT_PTR kShutdownTimer = 4101;
+constexpr UINT_PTR kPolicyTimer = 4102;
 } // namespace
 
 App& App::shared() {
@@ -66,6 +67,7 @@ bool App::init(HINSTANCE inst) {
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
 
     applyEnabledState();
+    SetTimer(hwnd_,kPolicyTimer,30000,nullptr);
 
     // 首次启动：打开设置窗口，让用户立刻完成配置
     Settings& s = Settings::shared();
@@ -338,8 +340,8 @@ void App::startStream(const std::wstring& text, std::optional<Language> from, La
             if (!PostMessageW(hwnd, WM_APP_TR_DELTA, (WPARAM)id, (LPARAM)payload))
                 delete payload;
         },
-        [hwnd](uint64_t id, bool ok, const std::wstring& error) {
-            auto* payload = new DoneMsg{ok, error};
+        [hwnd](uint64_t id, bool ok, const std::wstring& error, bool languageSettings) {
+            auto* payload = new DoneMsg{ok, error, languageSettings};
             if (!PostMessageW(hwnd, WM_APP_TR_DONE, (WPARAM)id, (LPARAM)payload))
                 delete payload;
         });
@@ -441,7 +443,7 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
                 std::lock_guard lock(state->mutex);
                 state->result += delta;
             },
-            [hwnd, state, c, d, generation](uint64_t, bool ok, const std::wstring& error) {
+            [hwnd, state, c, d, generation](uint64_t, bool ok, const std::wstring& error, bool languageSettings) {
                 std::lock_guard lock(state->mutex);
                 std::wstring cleaned = util::Trim(state->result);
                 const bool emptyResponse = ok && cleaned.empty();
@@ -456,6 +458,7 @@ void App::proceedRewrite(const capture::Capture& capIn, std::optional<Language> 
                     c.text,
                     d.to,
                     c.replacementTarget,
+                    languageSettings,
                 };
                 if (!PostMessageW(hwnd, WM_APP_REWRITE_DONE, 0, (LPARAM)msg)) delete msg;
             });
@@ -478,14 +481,14 @@ void App::replaceOrOfferCopy(std::wstring text, bool selectAll,
         });
 }
 
-void App::showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error) {
+void App::showErrorPopup(const std::wstring& original, Language target, RECT anchor, const std::wstring& error, bool languageSettings) {
     PopupWindow& popup = PopupWindow::shared();
     popup.show(original, target, anchor, /*showReplace=*/false);
     popup.onReplace = nullptr;
     popup.onRetarget = nullptr;
     popup.onRetry = nullptr;
     popup.onClosed = nullptr;
-    popup.setError(error);
+    popup.setError(error,languageSettings);
 }
 
 // ---------- 消息处理 ----------
@@ -510,6 +513,10 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
         quit();
         return 0;
     case WM_TIMER:
+        if(wp==kPolicyTimer&&!shuttingDown_){
+            if(const auto token=credentials::LoadSessionToken();!token.empty())account::FetchProfile(hwnd_,WM_APP_ACCOUNT_STATUS,token);
+            return 0;
+        }
         if (wp == kShutdownTimer && shuttingDown_ && workers::Shared().exited()) {
             KillTimer(hwnd_, kShutdownTimer);
             // All senders have returned. Deliver remaining messages to their
@@ -531,8 +538,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APP_ACCOUNT_STATUS: {
         auto update = account::TakeUpdate(lp);
         if(!update||!account::Current(update->generation)||!update->profile.isObject())return 0;
-        const auto notice=managed::AccessNotice(update->profile,Settings::shared().tenantId);
-        if(!notice.empty())MessageBoxW(hwnd_,util::Widen(notice).c_str(),L"ARType · доступ к программе",MB_OK|MB_ICONINFORMATION);
+        SettingsWindow::applyAccountProfile(update->profile);
         return 0;
     }
     case WM_HOTKEY:
@@ -561,7 +567,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
         auto* done = (DoneMsg*)lp;
         if ((uint64_t)wp == currentReq_ && PopupWindow::shared().isVisible()) {
             if (!done->ok)
-                PopupWindow::shared().setError(done->error);
+                PopupWindow::shared().setError(done->error,done->languageSettings);
             else if (util::Trim(PopupWindow::shared().translation()).empty())
                 PopupWindow::shared().setError(L"No translation returned");
             else
@@ -578,7 +584,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
             replaceOrOfferCopy(std::move(r->text), r->isWholeField, std::move(r->replacementTarget),
                                std::move(r->original), r->target, r->anchor);
         else
-            showErrorPopup(r->original, r->target, r->anchor, r->error);
+            showErrorPopup(r->original, r->target, r->anchor, r->error,r->languageSettings);
         delete r;
         return 0;
     }
@@ -599,7 +605,7 @@ LRESULT App::handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_APP_OPEN_SETTINGS:
-        openSettings();
+        if(wp==1)SettingsWindow::openLanguageSettings(hwnd_);else openSettings();
         return 0;
 
     case WM_APP_READ_CAPTURED: {
